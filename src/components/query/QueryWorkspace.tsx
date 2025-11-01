@@ -4,9 +4,10 @@ import { DataGrid } from "./DataGrid";
 import { TableDataTab } from "./TableDataTab";
 import { ChartRenderer } from "@/components/visualization/ChartRenderer";
 import { AiChatTab } from "@/components/ai/AiChatTab";
+import { MapViewer } from "@/components/map/MapViewer";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle, Database, X, Plus, Maximize2, Minimize2, BarChart3, Table as TableIcon, MessageCircleMore, Code } from "lucide-react";
+import { AlertCircle, Database, X, Plus, Maximize2, Minimize2, BarChart3, Table as TableIcon, MessageCircleMore, Code, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import {
@@ -19,6 +20,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useAiStore } from "@/stores/aiStore";
 import { useUIStore } from "@/stores/uiStore";
 import type { QueryTab, TableTab, VisualizationTab, ChatTab } from "@/types/query.types";
+import type { GeographicCell } from "@/types/geography.types";
 
 export function QueryWorkspace() {
   const { activeConnection } = useConnectionStore();
@@ -26,6 +28,8 @@ export function QueryWorkspace() {
   const { generateVisualization } = useAiStore();
   const { isGeneratingVisualization, setIsGeneratingVisualization } = useUIStore();
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const [selectedGeography, setSelectedGeography] = useState<GeographicCell | null>(null);
+  const [isMapFullscreen, setIsMapFullscreen] = useState(false);
 
   // Create initial tab if none exists
   useEffect(() => {
@@ -84,6 +88,7 @@ export function QueryWorkspace() {
     if (activeTab.type === 'query') {
       const queryTab = activeTab as QueryTab;
       const hasVisualization = queryTab.showVisualization && queryTab.chartConfig;
+      const hasMapView = selectedGeography !== null;
 
       return (
         <div className="flex flex-col h-full">
@@ -103,38 +108,85 @@ export function QueryWorkspace() {
               </div>
             ) : queryTab.result ? (
               <div className="flex flex-col h-full">
-                {/* Visualization Controls */}
-                {hasVisualization && (
+                {/* View Controls */}
+                {(hasVisualization || hasMapView) && (
                   <div className="flex items-center justify-between px-4 py-2 border-b bg-card">
-                    <h3 className="text-sm font-semibold">Results & Visualization</h3>
+                    <h3 className="text-sm font-semibold">
+                      {hasMapView ? "Results & Map" : "Results & Visualization"}
+                    </h3>
                     <div className="flex items-center gap-2">
-                      <Button
-                        variant={!queryTab.showVisualization ? "default" : "ghost"}
-                        size="sm"
-                        onClick={() => updateTab(queryTab.id, { showVisualization: false })}
-                        className="h-7"
-                      >
-                        <TableIcon className="h-4 w-4 mr-2" />
-                        Grid Only
-                      </Button>
-                      <Button
-                        variant={queryTab.showVisualization ? "default" : "ghost"}
-                        size="sm"
-                        onClick={() => updateTab(queryTab.id, { showVisualization: true })}
-                        className="h-7"
-                      >
-                        <BarChart3 className="h-4 w-4 mr-2" />
-                        Split View
-                      </Button>
+                      {hasVisualization && !hasMapView && (
+                        <>
+                          <Button
+                            variant={!queryTab.showVisualization ? "default" : "ghost"}
+                            size="sm"
+                            onClick={() => updateTab(queryTab.id, { showVisualization: false })}
+                            className="h-7"
+                          >
+                            <TableIcon className="h-4 w-4 mr-2" />
+                            Grid Only
+                          </Button>
+                          <Button
+                            variant={queryTab.showVisualization ? "default" : "ghost"}
+                            size="sm"
+                            onClick={() => updateTab(queryTab.id, { showVisualization: true })}
+                            className="h-7"
+                          >
+                            <BarChart3 className="h-4 w-4 mr-2" />
+                            Split View
+                          </Button>
+                        </>
+                      )}
+                      {hasMapView && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSelectedGeography(null)}
+                          className="h-7"
+                        >
+                          <X className="h-4 w-4 mr-2" />
+                          Close Map
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )}
 
-                {/* Split View or Grid Only */}
-                {hasVisualization ? (
+                {/* Split View with Map, Chart, or Grid Only */}
+                {hasMapView ? (
+                  <ResizablePanelGroup direction="horizontal" className="flex-1">
+                    <ResizablePanel
+                      defaultSize={isMapFullscreen ? 0 : 50}
+                      minSize={isMapFullscreen ? 0 : 30}
+                      collapsible={true}
+                    >
+                      <DataGrid
+                        result={queryTab.result}
+                        onGeographicCellClick={setSelectedGeography}
+                      />
+                    </ResizablePanel>
+                    <ResizableHandle withHandle />
+                    <ResizablePanel
+                      defaultSize={isMapFullscreen ? 100 : 50}
+                      minSize={isMapFullscreen ? 100 : 30}
+                    >
+                      <MapViewer
+                        geometry={selectedGeography.geometry}
+                        columnName={selectedGeography.columnName}
+                        rowIndex={selectedGeography.rowIndex}
+                        onClose={() => setSelectedGeography(null)}
+                        isFullscreen={isMapFullscreen}
+                        onToggleFullscreen={() => setIsMapFullscreen(!isMapFullscreen)}
+                      />
+                    </ResizablePanel>
+                  </ResizablePanelGroup>
+                ) : hasVisualization ? (
                   <ResizablePanelGroup direction="horizontal" className="flex-1">
                     <ResizablePanel defaultSize={50} minSize={30}>
-                      <DataGrid result={queryTab.result} />
+                      <DataGrid
+                        result={queryTab.result}
+                        onGeographicCellClick={setSelectedGeography}
+                      />
                     </ResizablePanel>
                     <ResizableHandle withHandle />
                     <ResizablePanel defaultSize={50} minSize={30}>
@@ -142,7 +194,10 @@ export function QueryWorkspace() {
                     </ResizablePanel>
                   </ResizablePanelGroup>
                 ) : (
-                  <DataGrid result={queryTab.result} />
+                  <DataGrid
+                    result={queryTab.result}
+                    onGeographicCellClick={setSelectedGeography}
+                  />
                 )}
               </div>
             ) : (

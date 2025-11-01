@@ -33,9 +33,6 @@ import {
   Plus,
   Save,
   RotateCcw,
-  Edit3,
-  Check,
-  X,
 } from "lucide-react";
 import type { QueryResult } from "@/types/query.types";
 import { isWKTGeometry, parseWKT } from "@/lib/geoUtils";
@@ -73,6 +70,7 @@ export function EditableDataGrid({
   );
   const [editValue, setEditValue] = useState<string>("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
 
   // Focus input when editing starts
   useEffect(() => {
@@ -120,7 +118,7 @@ export function EditableDataGrid({
     setEditValue("");
   };
 
-  // Save cell edit
+  // Save cell edit (auto-save on blur)
   const saveEdit = () => {
     if (!editingCell) return;
 
@@ -136,6 +134,27 @@ export function EditableDataGrid({
     }
 
     cancelEditing();
+  };
+
+  // Toggle row selection
+  const toggleRowSelection = (rowIndex: number) => {
+    const newSelection = new Set(selectedRows);
+    if (newSelection.has(rowIndex)) {
+      newSelection.delete(rowIndex);
+    } else {
+      newSelection.add(rowIndex);
+    }
+    setSelectedRows(newSelection);
+  };
+
+  // Delete selected rows
+  const deleteSelectedRows = () => {
+    const newDeletes = new Set(changes.deletes);
+    selectedRows.forEach((rowIndex) => {
+      newDeletes.add(rowIndex);
+    });
+    setChanges({ ...changes, deletes: newDeletes });
+    setSelectedRows(new Set()); // Clear selection after delete
   };
 
   // Delete row
@@ -191,24 +210,17 @@ export function EditableDataGrid({
     // Check if this cell is being edited
     if (editingCell?.rowIndex === rowIndex && editingCell?.columnName === columnName) {
       return (
-        <div className="flex items-center gap-1">
-          <Input
-            ref={inputRef}
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") saveEdit();
-              if (e.key === "Escape") cancelEditing();
-            }}
-            className="h-7 text-sm"
-          />
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={saveEdit}>
-            <Check className="h-3 w-3" />
-          </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={cancelEditing}>
-            <X className="h-3 w-3" />
-          </Button>
-        </div>
+        <Input
+          ref={inputRef}
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") saveEdit();
+            if (e.key === "Escape") cancelEditing();
+          }}
+          onBlur={saveEdit}
+          className="h-7 text-sm w-full"
+        />
       );
     }
 
@@ -334,85 +346,70 @@ export function EditableDataGrid({
 
   // Create columns from query result
   const columns = useMemo<ColumnDef<Record<string, any>>[]>(() => {
-    const dataColumns: ColumnDef<Record<string, any>>[] = result.columns.map((columnName) => ({
-      accessorKey: columnName,
-      header: columnName,
-      cell: ({ getValue, row }) => {
-        const rowIndex = row.index;
-        const value = getValue();
-        const isEdited = isCellEdited(rowIndex, columnName);
-
-        return (
-          <div
-            className={cn(
-              "group relative py-2 px-3 overflow-hidden",
-              isEdited && "bg-blue-50 dark:bg-blue-950/30",
-              isRowDeleted(rowIndex) && "opacity-50",
-              isRowInserted(rowIndex) && "bg-green-50 dark:bg-green-950/30"
-            )}
-            onDoubleClick={() => {
-              if (!isRowDeleted(rowIndex)) {
-                startEditing(rowIndex, columnName, value);
-              }
-            }}
-          >
-            <div className="overflow-x-auto whitespace-nowrap">
-              {renderCellValue(value, columnName, rowIndex)}
-            </div>
-            {!isRowDeleted(rowIndex) && (
-              <Button
-                size="icon"
-                variant="ghost"
-                className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={() => startEditing(rowIndex, columnName, value)}
-              >
-                <Edit3 className="h-3 w-3" />
-              </Button>
-            )}
+    const dataColumns: ColumnDef<Record<string, any>>[] = [
+      // Checkbox column for row selection
+      {
+        id: "select",
+        header: ({ table }) => (
+          <div className="flex items-center justify-center">
+            <input
+              type="checkbox"
+              checked={table.getIsAllPageRowsSelected()}
+              onChange={table.getToggleAllPageRowsSelectedHandler()}
+              className="h-4 w-4 rounded border-gray-300"
+            />
           </div>
-        );
+        ),
+        cell: ({ row }) => {
+          const rowIndex = row.index;
+          const isDeleted = isRowDeleted(rowIndex);
+          return (
+            <div className="flex items-center justify-center py-2">
+              <input
+                type="checkbox"
+                checked={selectedRows.has(rowIndex)}
+                onChange={() => toggleRowSelection(rowIndex)}
+                disabled={isDeleted}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+            </div>
+          );
+        },
       },
-    }));
+      // Data columns
+      ...result.columns.map((columnName) => ({
+        accessorKey: columnName,
+        header: columnName,
+        cell: ({ getValue, row }: any) => {
+          const rowIndex = row.index;
+          const value = getValue();
+          const isEdited = isCellEdited(rowIndex, columnName);
 
-    // Add actions column
-    dataColumns.push({
-      id: "actions",
-      header: () => <div className="text-center">Actions</div>,
-      cell: ({ row }) => {
-        const rowIndex = row.index;
-        const isDeleted = isRowDeleted(rowIndex);
-
-        return (
-          <div className="flex items-center justify-center gap-1">
-            <Button
-              size="icon"
-              variant="ghost"
+          return (
+            <div
               className={cn(
-                "h-7 w-7",
-                isDeleted
-                  ? "text-green-600 hover:text-green-700 dark:text-green-400"
-                  : "text-destructive hover:text-destructive/80"
+                "group relative py-2 px-3 overflow-hidden cursor-pointer",
+                isEdited && "bg-blue-50 dark:bg-blue-950/30",
+                isRowDeleted(rowIndex) && "opacity-50",
+                isRowInserted(rowIndex) && "bg-green-50 dark:bg-green-950/30"
               )}
-              onClick={() => {
-                if (isDeleted) {
-                  const newDeletes = new Set(changes.deletes);
-                  newDeletes.delete(rowIndex);
-                  setChanges({ ...changes, deletes: newDeletes });
-                } else {
-                  deleteRow(rowIndex);
+              onDoubleClick={() => {
+                if (!isRowDeleted(rowIndex)) {
+                  startEditing(rowIndex, columnName, value);
                 }
               }}
-              title={isDeleted ? "Restore row" : "Delete row"}
             >
-              {isDeleted ? <RotateCcw className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
-            </Button>
-          </div>
-        );
-      },
-    });
+              <div className="overflow-x-auto whitespace-nowrap">
+                {renderCellValue(value, columnName, rowIndex)}
+              </div>
+            </div>
+          );
+        },
+      })),
+    ];
 
     return dataColumns;
-  }, [result.columns, changes, editingCell, onGeographicCellClick]);
+  }, [result.columns, changes, editingCell, onGeographicCellClick, selectedRows]);
 
   const table = useReactTable({
     data: displayData,
@@ -427,7 +424,7 @@ export function EditableDataGrid({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header with change summary and actions */}
+      {/* Header with results info */}
       <div className="flex items-center justify-between px-4 py-2 border-b bg-card">
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold">
@@ -446,25 +443,6 @@ export function EditableDataGrid({
                 {changes.inserts.length} added
               </Badge>
             </div>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={addRow} className="h-8">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Row
-          </Button>
-          {hasChanges && (
-            <>
-              <Button size="sm" variant="outline" onClick={resetChanges} className="h-8">
-                <RotateCcw className="h-4 w-4 mr-2" />
-                Reset
-              </Button>
-              <Button size="sm" onClick={handleCommit} className="h-8">
-                <Save className="h-4 w-4 mr-2" />
-                Commit ({totalChanges})
-              </Button>
-            </>
           )}
         </div>
       </div>
@@ -519,6 +497,42 @@ export function EditableDataGrid({
             )}
           </TableBody>
         </Table>
+      </div>
+
+      {/* Table Actions - Above Pagination */}
+      <div className="flex items-center justify-between px-4 py-2 border-t bg-card/50">
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={addRow} className="h-8">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Row
+          </Button>
+          {selectedRows.size > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={deleteSelectedRows}
+              className="h-8 text-destructive hover:text-destructive/80"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Selected ({selectedRows.size})
+            </Button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {hasChanges && (
+            <>
+              <Button size="sm" variant="outline" onClick={resetChanges} className="h-8">
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Reset
+              </Button>
+              <Button size="sm" onClick={handleCommit} className="h-8">
+                <Save className="h-4 w-4 mr-2" />
+                Commit ({totalChanges})
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Pagination */}

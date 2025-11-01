@@ -13,6 +13,9 @@ export const useUIStore = create<IUIStore>((set) => ({
   exportDialogOpen: false,
   importDialogOpen: false,
   isGeneratingVisualization: false,
+  popoverOpen: false,
+  selectedGeography: null,
+  isMapFullscreen: false,
 
   toggleSidebar: () => {
     set((state) => ({ sidebarOpen: !state.sidebarOpen }));
@@ -52,5 +55,17 @@ export const useUIStore = create<IUIStore>((set) => ({
 
   setIsGeneratingVisualization: (isGenerating: boolean) => {
     set({ isGeneratingVisualization: isGenerating });
+  },
+
+  setPopoverOpen: (open: boolean) => {
+    set({ popoverOpen: open });
+  },
+
+  setSelectedGeography: (geography) => {
+    set({ selectedGeography: geography });
+  },
+
+  setIsMapFullscreen: (fullscreen: boolean) => {
+    set({ isMapFullscreen: fullscreen });
   },
 }));

@@ -1,13 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { QueryEditor } from "./QueryEditor";
 import { EditableDataGrid } from "./EditableDataGrid";
 import { TableDataTab } from "./TableDataTab";
 import { ChartRenderer } from "@/components/visualization/ChartRenderer";
 import { AiChatTab } from "@/components/ai/AiChatTab";
 import { MapViewer } from "@/components/map/MapViewer";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle, Database, X, Plus, Maximize2, Minimize2, BarChart3, Table as TableIcon, MessageCircleMore, Code, MapPin } from "lucide-react";
+import { AlertCircle, Database, X, Plus, Maximize2, BarChart3, Table as TableIcon, MessageCircleMore, Code } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import {
@@ -19,17 +18,28 @@ import { useQueryStore } from "@/stores/queryStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useAiStore } from "@/stores/aiStore";
 import { useUIStore } from "@/stores/uiStore";
-import type { QueryTab, TableTab, VisualizationTab, ChatTab } from "@/types/query.types";
-import type { GeographicCell } from "@/types/geography.types";
+import { useSchemaStore } from "@/stores/schemaStore";
+import type { QueryTab, TableTab, VisualizationTab } from "@/types/query.types";
+import type { DataGridChanges } from "@/types/datagrid.types";
+import { extractTableFromQuery } from "@/lib/queryParser";
+import { commitDataChanges } from "@/api/datagrid";
+import { toast } from "sonner";
 
 export function QueryWorkspace() {
   const { activeConnection } = useConnectionStore();
   const { tabs, activeTabId, addTab, addChatTab, setActiveTab, removeTab, updateTab } = useQueryStore();
   const { generateVisualization } = useAiStore();
-  const { isGeneratingVisualization, setIsGeneratingVisualization } = useUIStore();
-  const [popoverOpen, setPopoverOpen] = useState(false);
-  const [selectedGeography, setSelectedGeography] = useState<GeographicCell | null>(null);
-  const [isMapFullscreen, setIsMapFullscreen] = useState(false);
+  const { schema } = useSchemaStore();
+  const {
+    isGeneratingVisualization,
+    setIsGeneratingVisualization,
+    popoverOpen,
+    setPopoverOpen,
+    selectedGeography,
+    setSelectedGeography,
+    isMapFullscreen,
+    setIsMapFullscreen,
+  } = useUIStore();
 
   // Create initial tab if none exists
   useEffect(() => {
@@ -64,6 +74,60 @@ export function QueryWorkspace() {
     }
   };
 
+  // Handle commit changes for query results
+  const createQueryCommitHandler = (queryTab: QueryTab) => {
+    return async (changes: DataGridChanges, originalRows: Record<string, any>[]) => {
+      if (!activeConnection || !schema || !queryTab.query) {
+        toast.error("Cannot commit changes: Missing connection or schema");
+        return;
+      }
+
+      // Try to extract table name from query
+      const tableInfo = extractTableFromQuery(queryTab.query);
+
+      if (!tableInfo.isSimpleQuery || !tableInfo.tableName) {
+        toast.error("Cannot commit changes: Only simple single-table queries are supported for commits");
+        return;
+      }
+
+      // Find table in schema
+      const table = schema.tables.find(t => t.name.toLowerCase() === tableInfo.tableName?.toLowerCase());
+
+      if (!table) {
+        toast.error(`Cannot commit changes: Table '${tableInfo.tableName}' not found in schema`);
+        return;
+      }
+
+      // Extract primary key columns
+      const primaryKeyColumns = table.columns
+        .filter(col => col.is_primary_key)
+        .map(col => col.name);
+
+      if (primaryKeyColumns.length === 0) {
+        toast.error(`Cannot commit changes: Table '${table.name}' has no primary key`);
+        return;
+      }
+
+      try {
+        const result = await commitDataChanges(
+          activeConnection.id,
+          table.name,
+          primaryKeyColumns,
+          changes,
+          originalRows
+        );
+
+        toast.success(result.message);
+
+        // Note: We don't auto-reload query results as the query might have filters/conditions
+        // User can re-run the query manually to see changes
+      } catch (error: any) {
+        console.error("Failed to commit changes:", error);
+        toast.error(`Failed to commit changes: ${error.message || error}`);
+      }
+    };
+  };
+
   if (!activeConnection) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8">
@@ -89,6 +153,23 @@ export function QueryWorkspace() {
       const queryTab = activeTab as QueryTab;
       const hasVisualization = queryTab.showVisualization && queryTab.chartConfig;
       const hasMapView = selectedGeography !== null;
+
+      // Try to extract table metadata from query
+      let tableName: string | undefined;
+      let primaryKeyColumns: string[] | undefined;
+
+      if (queryTab.query && schema) {
+        const tableInfo = extractTableFromQuery(queryTab.query);
+        if (tableInfo.isSimpleQuery && tableInfo.tableName) {
+          const table = schema.tables.find(t => t.name.toLowerCase() === tableInfo.tableName?.toLowerCase());
+          if (table) {
+            tableName = table.name;
+            primaryKeyColumns = table.columns
+              .filter(col => col.is_primary_key)
+              .map(col => col.name);
+          }
+        }
+      }
 
       return (
         <div className="flex flex-col h-full">
@@ -163,10 +244,9 @@ export function QueryWorkspace() {
                       <EditableDataGrid
                         result={queryTab.result}
                         onGeographicCellClick={setSelectedGeography}
-                        onCommitChanges={async (changes) => {
-                          console.log("Committing changes:", changes);
-                          // TODO: Implement backend persistence
-                        }}
+                        tableName={tableName}
+                        primaryKeyColumns={primaryKeyColumns}
+                        onCommitChanges={createQueryCommitHandler(queryTab)}
                       />
                     </ResizablePanel>
                     <ResizableHandle withHandle />
@@ -190,10 +270,9 @@ export function QueryWorkspace() {
                       <EditableDataGrid
                         result={queryTab.result}
                         onGeographicCellClick={setSelectedGeography}
-                        onCommitChanges={async (changes) => {
-                          console.log("Committing changes:", changes);
-                          // TODO: Implement backend persistence
-                        }}
+                        tableName={tableName}
+                        primaryKeyColumns={primaryKeyColumns}
+                        onCommitChanges={createQueryCommitHandler(queryTab)}
                       />
                     </ResizablePanel>
                     <ResizableHandle withHandle />
@@ -264,9 +343,10 @@ export function QueryWorkspace() {
               <ResizablePanel defaultSize={50} minSize={30}>
                 <EditableDataGrid
                   result={vizTab.queryResult}
-                  onCommitChanges={async (changes) => {
-                    console.log("Committing changes:", changes);
-                    // TODO: Implement backend persistence
+                  onCommitChanges={async (changes, originalRows) => {
+                    console.log("Committing changes:", changes, "Original rows:", originalRows);
+                    // Note: For arbitrary queries, we cannot commit changes without table metadata
+                    // Commits are only supported when viewing tables directly
                   }}
                 />
               </ResizablePanel>

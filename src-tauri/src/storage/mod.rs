@@ -19,6 +19,12 @@ pub struct AppSettings {
     pub openrouter_api_key: String,
     pub text_to_sql_model: String,
     pub visualization_model: String,
+    #[serde(default = "default_conversation_history_limit")]
+    pub conversation_history_limit: usize,
+}
+
+fn default_conversation_history_limit() -> usize {
+    10
 }
 
 impl StorageManager {

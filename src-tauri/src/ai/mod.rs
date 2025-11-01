@@ -9,4 +9,4 @@ pub mod visualization;
 
 // Re-export commonly used types
 pub use agent::{run_react_agent, AgentResponse};
-pub use memory::{load_conversation, save_conversation, clear_conversation};
+pub use memory::{load_conversation, load_conversation_with_limit, save_conversation, clear_conversation};

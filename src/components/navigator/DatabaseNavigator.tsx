@@ -9,7 +9,12 @@ import {
   Edit,
   Download,
   Upload,
-  Loader2
+  Loader2,
+  Columns3,
+  Key,
+  Shield,
+  Zap,
+  ListTree
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -42,7 +47,265 @@ import { useQueryStore } from "@/stores/queryStore";
 import { useUIStore } from "@/stores/uiStore";
 import { ExportDialog } from "@/components/export_import/ExportDialog";
 import { ImportDialog } from "@/components/export_import/ImportDialog";
-import type { Connection, Table } from "@/types/database.types";
+import type { Connection, Table, Column } from "@/types/database.types";
+
+interface TableItemProps {
+  table: Table;
+  onTableClick: (table: Table) => void;
+}
+
+function TableItem({ table, onTableClick }: TableItemProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState(true);
+  const [foreignKeysOpen, setForeignKeysOpen] = useState(false);
+  const [constraintsOpen, setConstraintsOpen] = useState(false);
+  const [triggersOpen, setTriggersOpen] = useState(false);
+  const [indexesOpen, setIndexesOpen] = useState(false);
+
+  const foreignKeys = table.columns.filter(col => col.is_foreign_key);
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger>
+        <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+          <div className="mb-1">
+            <div className="flex items-center group">
+              <CollapsibleTrigger
+                className="flex items-center justify-center p-1 hover:bg-accent rounded flex-shrink-0"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {isOpen ? (
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                )}
+              </CollapsibleTrigger>
+              <button
+                onClick={() => onTableClick(table)}
+                className="flex items-center gap-2 px-2 py-1.5 hover:bg-accent rounded flex-1 min-w-0"
+              >
+                <TableIcon className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+                <span className="font-medium truncate text-sm text-left">
+                  {table.name}
+                </span>
+                {table.row_count !== undefined && (
+                  <Badge variant="secondary" className="text-xs h-5 ml-auto flex-shrink-0">
+                    {table.row_count.toLocaleString()}
+                  </Badge>
+                )}
+              </button>
+            </div>
+
+            <CollapsibleContent>
+              <div className="ml-5 pl-3 border-l-2 border-border/40 text-xs">
+                {/* Columns Section */}
+                <Collapsible open={columnsOpen} onOpenChange={setColumnsOpen}>
+                  <div className="flex items-center py-1.5">
+                    <CollapsibleTrigger
+                      className="flex items-center justify-center p-0.5 hover:bg-accent rounded flex-shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {columnsOpen ? (
+                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                      )}
+                    </CollapsibleTrigger>
+                    <div className="flex items-center gap-1.5 px-2 text-muted-foreground">
+                      <Columns3 className="h-3 w-3" />
+                      <span className="font-medium">Columns ({table.columns.length})</span>
+                    </div>
+                  </div>
+                  <CollapsibleContent>
+                    <div className="space-y-1 ml-5 pb-1">
+                      {table.columns.map((col: Column) => (
+                        <div key={col.name} className="flex items-center gap-2 text-xs py-0.5">
+                          <span className="font-mono text-foreground">{col.name}</span>
+                          <span className="text-muted-foreground">{col.data_type}</span>
+                          {col.is_primary_key && (
+                            <Badge variant="outline" className="text-xs h-4 px-1">PK</Badge>
+                          )}
+                          {col.is_foreign_key && (
+                            <Badge variant="outline" className="text-xs h-4 px-1">FK</Badge>
+                          )}
+                          {!col.is_nullable && (
+                            <span className="text-muted-foreground">NOT NULL</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+
+                {/* Foreign Keys Section */}
+                <Collapsible open={foreignKeysOpen} onOpenChange={setForeignKeysOpen}>
+                  <div className="flex items-center py-1.5">
+                    <CollapsibleTrigger
+                      className="flex items-center justify-center p-0.5 hover:bg-accent rounded flex-shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {foreignKeysOpen ? (
+                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                      )}
+                    </CollapsibleTrigger>
+                    <div className="flex items-center gap-1.5 px-2 text-muted-foreground">
+                      <Key className="h-3 w-3" />
+                      <span className="font-medium">Foreign Keys ({foreignKeys.length})</span>
+                    </div>
+                  </div>
+                  <CollapsibleContent>
+                    {foreignKeys.length > 0 ? (
+                      <div className="space-y-1 ml-5 pb-1">
+                        {foreignKeys.map((col: Column) => (
+                          <div key={col.name} className="text-xs py-0.5">
+                            <span className="font-mono text-foreground">{col.name}</span>
+                            <span className="text-muted-foreground"> → </span>
+                            <span className="text-primary">
+                              {col.foreign_key_table}.{col.foreign_key_column}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="ml-5 pb-1 text-muted-foreground">No foreign keys</div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+
+                {/* Constraints Section */}
+                <Collapsible open={constraintsOpen} onOpenChange={setConstraintsOpen}>
+                  <div className="flex items-center py-1.5">
+                    <CollapsibleTrigger
+                      className="flex items-center justify-center p-0.5 hover:bg-accent rounded flex-shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {constraintsOpen ? (
+                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                      )}
+                    </CollapsibleTrigger>
+                    <div className="flex items-center gap-1.5 px-2 text-muted-foreground">
+                      <Shield className="h-3 w-3" />
+                      <span className="font-medium">Constraints ({table.constraints?.length || 0})</span>
+                    </div>
+                  </div>
+                  <CollapsibleContent>
+                    {table.constraints && table.constraints.length > 0 ? (
+                      <div className="space-y-1 ml-5 pb-1">
+                        {table.constraints.map((constraint) => (
+                          <div key={constraint.name} className="text-xs">
+                            <div className="font-medium text-foreground">{constraint.name}</div>
+                            <div className="text-muted-foreground ml-2">
+                              {constraint.constraint_type} ({constraint.columns.join(', ')})
+                              {constraint.referenced_table && constraint.referenced_columns && (
+                                <span> → {constraint.referenced_table}({constraint.referenced_columns.join(', ')})</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="ml-5 pb-1 text-muted-foreground text-xs">No constraints</div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+
+                {/* Triggers Section */}
+                <Collapsible open={triggersOpen} onOpenChange={setTriggersOpen}>
+                  <div className="flex items-center py-1.5">
+                    <CollapsibleTrigger
+                      className="flex items-center justify-center p-0.5 hover:bg-accent rounded flex-shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {triggersOpen ? (
+                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                      )}
+                    </CollapsibleTrigger>
+                    <div className="flex items-center gap-1.5 px-2 text-muted-foreground">
+                      <Zap className="h-3 w-3" />
+                      <span className="font-medium">Triggers ({table.triggers?.length || 0})</span>
+                    </div>
+                  </div>
+                  <CollapsibleContent>
+                    {table.triggers && table.triggers.length > 0 ? (
+                      <div className="space-y-1 ml-5 pb-1">
+                        {table.triggers.map((trigger) => (
+                          <div key={trigger.name} className="text-xs">
+                            <div className="font-medium text-foreground">{trigger.name}</div>
+                            <div className="text-muted-foreground ml-2">
+                              {trigger.timing} {trigger.event}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="ml-5 pb-1 text-muted-foreground text-xs">No triggers</div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+
+                {/* Indexes Section */}
+                <Collapsible open={indexesOpen} onOpenChange={setIndexesOpen}>
+                  <div className="flex items-center py-1.5">
+                    <CollapsibleTrigger
+                      className="flex items-center justify-center p-0.5 hover:bg-accent rounded flex-shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {indexesOpen ? (
+                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                      )}
+                    </CollapsibleTrigger>
+                    <div className="flex items-center gap-1.5 px-2 text-muted-foreground">
+                      <ListTree className="h-3 w-3" />
+                      <span className="font-medium">Indexes ({table.indexes?.length || 0})</span>
+                    </div>
+                  </div>
+                  <CollapsibleContent>
+                    {table.indexes && table.indexes.length > 0 ? (
+                      <div className="space-y-1 ml-5 pb-1">
+                        {table.indexes.map((index) => (
+                          <div key={index.name} className="text-xs">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-medium text-foreground">{index.name}</span>
+                              {index.is_primary && (
+                                <Badge variant="outline" className="text-xs h-4 px-1">PRIMARY</Badge>
+                              )}
+                              {index.is_unique && !index.is_primary && (
+                                <Badge variant="outline" className="text-xs h-4 px-1">UNIQUE</Badge>
+                              )}
+                            </div>
+                            <div className="text-muted-foreground ml-2">
+                              {index.index_type && `${index.index_type} `}({index.columns.join(', ')})
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="ml-5 pb-1 text-muted-foreground text-xs">No indexes</div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+            </CollapsibleContent>
+          </div>
+        </Collapsible>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={() => onTableClick(table)}>
+          <TableIcon className="h-4 w-4 mr-2" />
+          View Data
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
 
 interface ConnectionItemProps {
   connection: Connection;
@@ -122,35 +385,16 @@ function ConnectionItem({ connection, isActive, onConnect, onEdit, onDelete }: C
                         <p className="text-xs text-muted-foreground">Loading schema...</p>
                       </div>
                     ) : schema && schema.tables.length > 0 ? (
-                      <div className="space-y-0.5">
+                      <div className="space-y-1">
                         <div className="px-2 py-1 text-xs text-muted-foreground">
                           {schema.tables.length} {schema.tables.length === 1 ? "table" : "tables"}
                         </div>
                         {schema.tables.map((table) => (
-                          <ContextMenu key={table.name}>
-                            <ContextMenuTrigger>
-                              <button
-                                onClick={() => handleTableClick(table)}
-                                className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-accent rounded-md text-sm transition-colors group"
-                              >
-                                <TableIcon className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
-                                <span className="font-medium truncate flex-1 text-left">
-                                  {table.name}
-                                </span>
-                                {table.row_count !== undefined && (
-                                  <Badge variant="secondary" className="text-xs h-5">
-                                    {table.row_count.toLocaleString()}
-                                  </Badge>
-                                )}
-                              </button>
-                            </ContextMenuTrigger>
-                            <ContextMenuContent>
-                              <ContextMenuItem onClick={() => handleTableClick(table)}>
-                                <TableIcon className="h-4 w-4 mr-2" />
-                                View Data
-                              </ContextMenuItem>
-                            </ContextMenuContent>
-                          </ContextMenu>
+                          <TableItem
+                            key={table.name}
+                            table={table}
+                            onTableClick={handleTableClick}
+                          />
                         ))}
                       </div>
                     ) : (

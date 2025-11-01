@@ -53,6 +53,23 @@ pub fn load_conversation(app: &AppHandle, session_id: &str) -> AppResult<Vec<Mes
     Ok(history.messages)
 }
 
+/// Load last N messages from conversation (for context window management)
+pub fn load_conversation_with_limit(
+    app: &AppHandle,
+    session_id: &str,
+    limit: usize,
+) -> AppResult<Vec<Message>> {
+    let all_messages = load_conversation(app, session_id)?;
+
+    if all_messages.len() <= limit {
+        return Ok(all_messages);
+    }
+
+    // Take the last N messages
+    let start_index = all_messages.len() - limit;
+    Ok(all_messages[start_index..].to_vec())
+}
+
 /// Clear conversation from disk
 pub fn clear_conversation(app: &AppHandle, session_id: &str) -> AppResult<()> {
     let path = get_conversation_path(app, session_id)?;

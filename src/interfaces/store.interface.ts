@@ -1,6 +1,7 @@
 import type { Connection, Schema, ConnectionStatus } from "@/types/database.types";
 import type { AppSettings } from "@/types/settings.types";
 import type { Tab } from "@/types/query.types";
+import type { GeographicCell } from "@/types/geography.types";
 
 export interface ISettingsStore {
   settings: AppSettings | null;
@@ -58,6 +59,9 @@ export interface IUIStore {
   exportDialogOpen: boolean;
   importDialogOpen: boolean;
   isGeneratingVisualization: boolean;
+  popoverOpen: boolean;
+  selectedGeography: GeographicCell | null;
+  isMapFullscreen: boolean;
   toggleSidebar: () => void;
   setSettingsDialogOpen: (open: boolean) => void;
   setConnectionDialogOpen: (open: boolean, editingConnectionId?: string | null) => void;
@@ -68,4 +72,7 @@ export interface IUIStore {
   setExportDialogOpen: (open: boolean) => void;
   setImportDialogOpen: (open: boolean) => void;
   setIsGeneratingVisualization: (isGenerating: boolean) => void;
+  setPopoverOpen: (open: boolean) => void;
+  setSelectedGeography: (geography: GeographicCell | null) => void;
+  setIsMapFullscreen: (fullscreen: boolean) => void;
 }

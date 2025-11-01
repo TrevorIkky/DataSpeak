@@ -37,20 +37,24 @@ import {
 import type { QueryResult } from "@/types/query.types";
 import { isWKTGeometry, parseWKT } from "@/lib/geoUtils";
 import type { GeographicCell } from "@/types/geography.types";
-import type { DataGridChanges, CellEdit, RowInsert } from "@/types/datagrid.types";
+import type { DataGridChanges, RowInsert } from "@/types/datagrid.types";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 interface EditableDataGridProps {
   result: QueryResult;
   onGeographicCellClick?: (cell: GeographicCell) => void;
-  onCommitChanges?: (changes: DataGridChanges) => Promise<void>;
+  onCommitChanges?: (changes: DataGridChanges, originalRows: Record<string, any>[]) => Promise<void>;
+  tableName?: string;
+  primaryKeyColumns?: string[];
 }
 
 export function EditableDataGrid({
   result,
   onGeographicCellClick,
   onCommitChanges,
+  tableName,
+  primaryKeyColumns,
 }: EditableDataGridProps) {
   const [pagination, setPagination] = useState({
     pageIndex: 0,
@@ -71,6 +75,8 @@ export function EditableDataGrid({
   const [editValue, setEditValue] = useState<string>("");
   const inputRef = useRef<HTMLInputElement>(null);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const saveEditRef = useRef<(() => void) | null>(null);
 
   // Focus input when editing starts
   useEffect(() => {
@@ -78,6 +84,35 @@ export function EditableDataGrid({
       inputRef.current.focus();
       inputRef.current.select();
     }
+  }, [editingCell]);
+
+  // Cleanup click timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Handle clicks outside of editing cell to save and exit
+  useEffect(() => {
+    if (!editingCell) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      // Check if click is outside the input
+      if (inputRef.current && !inputRef.current.contains(event.target as Node)) {
+        // Use the ref to avoid stale closure issues
+        saveEditRef.current?.();
+      }
+    };
+
+    // Use mousedown instead of click to capture before other handlers
+    document.addEventListener('mousedown', handleClickOutside);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
   }, [editingCell]);
 
   // Combine original data with inserts and apply deletes
@@ -136,6 +171,11 @@ export function EditableDataGrid({
     cancelEditing();
   };
 
+  // Keep ref updated with latest saveEdit function
+  useEffect(() => {
+    saveEditRef.current = saveEdit;
+  });
+
   // Toggle row selection
   const toggleRowSelection = (rowIndex: number) => {
     const newSelection = new Set(selectedRows);
@@ -155,13 +195,6 @@ export function EditableDataGrid({
     });
     setChanges({ ...changes, deletes: newDeletes });
     setSelectedRows(new Set()); // Clear selection after delete
-  };
-
-  // Delete row
-  const deleteRow = (rowIndex: number) => {
-    const newDeletes = new Set(changes.deletes);
-    newDeletes.add(rowIndex);
-    setChanges({ ...changes, deletes: newDeletes });
   };
 
   // Add new row
@@ -193,10 +226,13 @@ export function EditableDataGrid({
     cancelEditing();
   };
 
+  // Check if commits are supported
+  const canCommit = tableName && primaryKeyColumns && primaryKeyColumns.length > 0;
+
   // Commit changes
   const handleCommit = async () => {
-    if (onCommitChanges) {
-      await onCommitChanges(changes);
+    if (onCommitChanges && canCommit) {
+      await onCommitChanges(changes, result.rows);
       resetChanges();
     }
   };
@@ -215,8 +251,18 @@ export function EditableDataGrid({
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") saveEdit();
-            if (e.key === "Escape") cancelEditing();
+            if (e.key === "Enter") {
+              e.preventDefault();
+              saveEdit();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              cancelEditing();
+            }
+          }}
+          onClick={(e) => {
+            // Prevent clicks on the input from bubbling up
+            e.stopPropagation();
           }}
           onBlur={saveEdit}
           className="h-7 text-sm w-full"
@@ -262,7 +308,8 @@ export function EditableDataGrid({
 
         return (
           <button
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               if (geometry && onGeographicCellClick) {
                 onGeographicCellClick({
                   columnName,
@@ -271,6 +318,10 @@ export function EditableDataGrid({
                   rawValue: displayValue,
                 });
               }
+            }}
+            onDoubleClick={(e) => {
+              // Prevent double-click from triggering cell edit for geographic cells
+              e.stopPropagation();
             }}
             className="flex items-center gap-2 font-mono text-green-700 dark:text-green-400 text-sm hover:underline cursor-pointer whitespace-nowrap"
             title={`Click to view on map\n\n${displayValue}`}
@@ -352,12 +403,14 @@ export function EditableDataGrid({
         id: "select",
         header: ({ table }) => (
           <div className="flex items-center justify-center">
-            <input
-              type="checkbox"
-              checked={table.getIsAllPageRowsSelected()}
-              onChange={table.getToggleAllPageRowsSelectedHandler()}
-              className="h-4 w-4 rounded border-gray-300"
-            />
+            {displayData.length > 0 && (
+              <input
+                type="checkbox"
+                checked={table.getIsAllPageRowsSelected()}
+                onChange={table.getToggleAllPageRowsSelectedHandler()}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+            )}
           </div>
         ),
         cell: ({ row }) => {
@@ -385,19 +438,47 @@ export function EditableDataGrid({
           const value = getValue();
           const isEdited = isCellEdited(rowIndex, columnName);
 
+          const isEditing = editingCell?.rowIndex === rowIndex && editingCell?.columnName === columnName;
+
           return (
             <div
               className={cn(
-                "group relative py-2 px-3 overflow-hidden cursor-pointer",
+                "group relative py-2 px-3 overflow-hidden cursor-cell hover:bg-muted/50 transition-colors",
                 isEdited && "bg-blue-50 dark:bg-blue-950/30",
-                isRowDeleted(rowIndex) && "opacity-50",
-                isRowInserted(rowIndex) && "bg-green-50 dark:bg-green-950/30"
+                isRowDeleted(rowIndex) && "opacity-50 cursor-not-allowed",
+                isRowInserted(rowIndex) && "bg-green-50 dark:bg-green-950/30",
+                isEditing && "cursor-text"
               )}
-              onDoubleClick={() => {
-                if (!isRowDeleted(rowIndex)) {
+              onClick={() => {
+                // Don't trigger edit mode if already editing
+                if (isEditing || isRowDeleted(rowIndex)) return;
+
+                // Clear any existing timeout
+                if (clickTimeoutRef.current) {
+                  clearTimeout(clickTimeoutRef.current);
+                  clickTimeoutRef.current = null;
+                }
+
+                // Set a timeout for single click - will be cleared if double-click happens
+                clickTimeoutRef.current = setTimeout(() => {
+                  startEditing(rowIndex, columnName, value);
+                  clickTimeoutRef.current = null;
+                }, 250);
+              }}
+              onDoubleClick={(e) => {
+                if (!isRowDeleted(rowIndex) && !isEditing) {
+                  e.stopPropagation();
+
+                  // Clear single click timeout
+                  if (clickTimeoutRef.current) {
+                    clearTimeout(clickTimeoutRef.current);
+                    clickTimeoutRef.current = null;
+                  }
+
                   startEditing(rowIndex, columnName, value);
                 }
               }}
+              title={isRowDeleted(rowIndex) ? "Row is deleted" : isEditing ? "" : "Click to edit"}
             >
               <div className="overflow-x-auto whitespace-nowrap">
                 {renderCellValue(value, columnName, rowIndex)}
@@ -409,7 +490,7 @@ export function EditableDataGrid({
     ];
 
     return dataColumns;
-  }, [result.columns, changes, editingCell, onGeographicCellClick, selectedRows]);
+  }, [result.columns, changes, editingCell, editValue, onGeographicCellClick, selectedRows, displayData.length]);
 
   const table = useReactTable({
     data: displayData,
@@ -489,9 +570,11 @@ export function EditableDataGrid({
                 );
               })
             ) : (
-              <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center">
-                  No results.
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={columns.length} className="h-[400px] p-0">
+                  <div className="flex items-center justify-center h-full w-full">
+                    <p className="text-sm text-muted-foreground">No results.</p>
+                  </div>
                 </TableCell>
               </TableRow>
             )}
@@ -526,7 +609,13 @@ export function EditableDataGrid({
                 <RotateCcw className="h-4 w-4 mr-2" />
                 Reset
               </Button>
-              <Button size="sm" onClick={handleCommit} className="h-8">
+              <Button
+                size="sm"
+                onClick={handleCommit}
+                className="h-8"
+                disabled={!canCommit}
+                title={!canCommit ? "Commits are only supported for tables with primary keys" : undefined}
+              >
                 <Save className="h-4 w-4 mr-2" />
                 Commit ({totalChanges})
               </Button>
@@ -535,76 +624,78 @@ export function EditableDataGrid({
         </div>
       </div>
 
-      {/* Pagination */}
-      <div className="flex items-center justify-between px-4 py-3 border-t bg-card">
-        <div className="flex items-center gap-2">
-          <p className="text-sm text-muted-foreground">
-            Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-6">
+      {/* Pagination - Only show if there's data */}
+      {displayData.length > 0 && (
+        <div className="flex items-center justify-between px-4 py-3 border-t bg-card">
           <div className="flex items-center gap-2">
-            <p className="text-sm text-muted-foreground whitespace-nowrap">Rows per page</p>
-            <Select
-              value={`${table.getState().pagination.pageSize}`}
-              onValueChange={(value) => {
-                table.setPageSize(Number(value));
-              }}
-            >
-              <SelectTrigger className="h-8 w-[70px]">
-                <SelectValue placeholder={table.getState().pagination.pageSize} />
-              </SelectTrigger>
-              <SelectContent side="top">
-                {[10, 20, 50, 100, 200].map((pageSize) => (
-                  <SelectItem key={pageSize} value={`${pageSize}`}>
-                    {pageSize}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <p className="text-sm text-muted-foreground">
+              Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
+            </p>
           </div>
 
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => table.firstPage()}
-              disabled={!table.getCanPreviousPage()}
-            >
-              <ChevronsLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => table.lastPage()}
-              disabled={!table.getCanNextPage()}
-            >
-              <ChevronsRight className="h-4 w-4" />
-            </Button>
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-muted-foreground whitespace-nowrap">Rows per page</p>
+              <Select
+                value={`${table.getState().pagination.pageSize}`}
+                onValueChange={(value) => {
+                  table.setPageSize(Number(value));
+                }}
+              >
+                <SelectTrigger className="h-8 w-[70px]">
+                  <SelectValue placeholder={table.getState().pagination.pageSize} />
+                </SelectTrigger>
+                <SelectContent side="top">
+                  {[10, 20, 50, 100, 200].map((pageSize) => (
+                    <SelectItem key={pageSize} value={`${pageSize}`}>
+                      {pageSize}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => table.firstPage()}
+                disabled={!table.getCanPreviousPage()}
+              >
+                <ChevronsLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => table.previousPage()}
+                disabled={!table.getCanPreviousPage()}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => table.nextPage()}
+                disabled={!table.getCanNextPage()}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => table.lastPage()}
+                disabled={!table.getCanNextPage()}
+              >
+                <ChevronsRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

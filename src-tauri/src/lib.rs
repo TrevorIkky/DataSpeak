@@ -139,6 +139,14 @@ async fn run_query(
     db::query::execute_query(&state.connections, &connection_id, &query, limit, offset).await
 }
 
+#[tauri::command]
+async fn commit_data_changes(
+    state: State<'_, AppState>,
+    request: db::commit::CommitRequest,
+) -> AppResult<db::commit::CommitResult> {
+    db::commit::commit_data_changes(&state.connections, request).await
+}
+
 // Import/Export Commands
 #[tauri::command]
 async fn export_tables(
@@ -185,11 +193,24 @@ async fn stream_ai_chat(
 
     // Run agent in background (non-blocking)
     let connections = Arc::clone(&state.connections);
+    let history_limit = settings.conversation_history_limit;
     tokio::spawn(async move {
+        // Load conversation history with limit
+        let previous_messages = ai::load_conversation_with_limit(
+            &app,
+            &session_id,
+            history_limit,
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to load conversation history: {}", e);
+            Vec::new()
+        });
+
         let result = ai::run_react_agent(
             session_id.clone(),
-            connection_id,
-            message,
+            connection_id.clone(),
+            message.clone(),
+            previous_messages.clone(),
             &app,
             &connections,
             &settings,
@@ -197,12 +218,18 @@ async fn stream_ai_chat(
 
         // Save conversation after agent completes
         if let Ok(response) = &result {
-            // Load existing messages and append
-            if let Ok(mut messages) = ai::load_conversation(&app, &session_id) {
-                // In a real implementation, we'd track all messages from the agent run
-                // For now, just save a marker
-                let _ = ai::save_conversation(&app, &session_id, &session_id, &messages);
-            }
+            // Load all existing messages (not limited)
+            let mut all_messages = ai::load_conversation(&app, &session_id)
+                .unwrap_or_else(|_| Vec::new());
+
+            // Append user message
+            all_messages.push(ai::agent::Message::user(&message));
+
+            // Append assistant response
+            all_messages.push(ai::agent::Message::assistant(&response.answer));
+
+            // Save complete conversation
+            let _ = ai::save_conversation(&app, &session_id, &connection_id, &all_messages);
         }
 
         if let Err(e) = result {
@@ -306,6 +333,7 @@ pub fn run() {
             update_connection,
             get_schema,
             run_query,
+            commit_data_changes,
             export_tables,
             import_tables,
             stream_ai_chat,

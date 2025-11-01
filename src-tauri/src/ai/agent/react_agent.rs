@@ -16,6 +16,7 @@ pub async fn run_react_agent(
     session_id: String,
     connection_id: String,
     question: String,
+    previous_messages: Vec<Message>,
     app: &AppHandle,
     connections: &ConnectionManager,
     settings: &AppSettings,
@@ -37,10 +38,13 @@ pub async fn run_react_agent(
         use futures::StreamExt;
 
         let system_prompt = prompts::build_system_prompt("", &question_type);
-        let messages = vec![
-            Message::system(system_prompt),
-            Message::user(&question),
-        ];
+        let mut messages = vec![Message::system(system_prompt)];
+
+        // Add previous conversation history
+        messages.extend(previous_messages.clone());
+
+        // Add current question
+        messages.push(Message::user(&question));
 
         let mut stream = client
             .chat_stream(&settings.text_to_sql_model, &messages, Some(0.7))
@@ -88,12 +92,15 @@ pub async fn run_react_agent(
     // Build tool definitions
     let tool_defs = tools::build_tools();
 
-    // Initialize messages
+    // Initialize messages with system prompt
     let system_prompt = prompts::build_system_prompt(&schema_str, &question_type);
-    let mut messages = vec![
-        Message::system(system_prompt),
-        Message::user(&question),
-    ];
+    let mut messages = vec![Message::system(system_prompt)];
+
+    // Add previous conversation history
+    messages.extend(previous_messages.clone());
+
+    // Add current question
+    messages.push(Message::user(&question));
 
     let mut sql_queries = Vec::new();
     let max_iterations = 5;

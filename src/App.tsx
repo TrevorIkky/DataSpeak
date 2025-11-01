@@ -121,8 +121,8 @@ function App() {
           <ResizablePanelGroup direction="horizontal" className="h-full">
             {/* Left Sidebar - Database Navigator */}
             <ResizablePanel
-              defaultSize={25}
-              minSize={20}
+              defaultSize={28}
+              minSize={28}
               maxSize={35}
               className="hidden md:flex"
             >

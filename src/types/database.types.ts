@@ -18,6 +18,9 @@ export type Table = {
   schema?: string;
   row_count?: number;
   columns: Column[];
+  indexes: Index[];
+  triggers: Trigger[];
+  constraints: Constraint[];
 };
 
 export type Column = {
@@ -30,6 +33,29 @@ export type Column = {
   foreign_key_column?: string;
   default_value?: string;
   character_maximum_length?: number;
+};
+
+export type Index = {
+  name: string;
+  columns: string[];
+  is_unique: boolean;
+  is_primary: boolean;
+  index_type?: string;
+};
+
+export type Trigger = {
+  name: string;
+  event: string;
+  timing: string;
+  statement?: string;
+};
+
+export type Constraint = {
+  name: string;
+  constraint_type: string;
+  columns: string[];
+  referenced_table?: string;
+  referenced_columns?: string[];
 };
 
 export type Schema = {

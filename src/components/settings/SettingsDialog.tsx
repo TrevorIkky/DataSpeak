@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useUIStore } from "@/stores/uiStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTheme } from "@/components/theme-provider";
@@ -54,6 +55,7 @@ export function SettingsDialog() {
       openrouter_api_key: "",
       text_to_sql_model: "anthropic/claude-3-sonnet",
       visualization_model: "anthropic/claude-3-sonnet",
+      conversation_history_limit: 10,
     },
   });
 
@@ -71,130 +73,160 @@ export function SettingsDialog() {
 
   return (
     <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
-      <DialogContent className="sm:max-w-[525px]">
-        <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>
-            Configure your theme, OpenRouter API key, and AI model preferences.
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent className="sm:max-w-[525px] max-h-[85vh] flex flex-col p-0">
+        <div className="px-6 pt-6">
+          <DialogHeader>
+            <DialogTitle>Settings</DialogTitle>
+            <DialogDescription>
+              Configure your theme, OpenRouter API key, AI model preferences, and conversation history.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <div className="space-y-2">
-              <label className="text-sm font-medium leading-none">
-                Theme
-              </label>
-              <Select value={theme} onValueChange={(value: "light" | "dark" | "system") => setTheme(value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select theme" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="light">Light</SelectItem>
-                  <SelectItem value="dark">Dark</SelectItem>
-                  <SelectItem value="system">System</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-sm text-muted-foreground">
-                Choose your preferred color theme.
-              </p>
-            </div>
-
-            <Separator />
-
-            <div className="space-y-1">
-              <h4 className="text-sm font-medium">AI Configuration</h4>
-              <p className="text-sm text-muted-foreground">
-                Configure OpenRouter API settings and model preferences.
-              </p>
-            </div>
-
-            <FormField
-              control={form.control}
-              name="openrouter_api_key"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>OpenRouter API Key</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="password"
-                      placeholder="sk-or-v1-..."
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    Your OpenRouter API key for AI features. Get one at{" "}
-                    <a
-                      href="https://openrouter.ai"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary underline"
-                    >
-                      openrouter.ai
-                    </a>
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="text_to_sql_model"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Text-to-SQL Model</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a model" />
-                      </SelectTrigger>
-                    </FormControl>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col">
+            <ScrollArea className="h-[450px] px-6">
+              <div className="space-y-6 py-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium leading-none">
+                    Theme
+                  </label>
+                  <Select value={theme} onValueChange={(value: "light" | "dark" | "system") => setTheme(value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select theme" />
+                    </SelectTrigger>
                     <SelectContent>
-                      {TEXT_TO_SQL_MODELS.map((model) => (
-                        <SelectItem key={model.id} value={model.id}>
-                          {model.name}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="light">Light</SelectItem>
+                      <SelectItem value="dark">Dark</SelectItem>
+                      <SelectItem value="system">System</SelectItem>
                     </SelectContent>
                   </Select>
-                  <FormDescription>
-                    Model used for generating SQL from natural language.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                  <p className="text-sm text-muted-foreground">
+                    Choose your preferred color theme.
+                  </p>
+                </div>
 
-            <FormField
-              control={form.control}
-              name="visualization_model"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Visualization Model</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a model" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {VISUALIZATION_MODELS.map((model) => (
-                        <SelectItem key={model.id} value={model.id}>
-                          {model.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>
-                    Model used for generating chart configurations.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                <Separator />
 
-            <div className="flex justify-end gap-2">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-medium">AI Configuration</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Configure OpenRouter API settings and model preferences.
+                  </p>
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name="openrouter_api_key"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>OpenRouter API Key</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="password"
+                          placeholder="sk-or-v1-..."
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        Your OpenRouter API key for AI features. Get one at{" "}
+                        <a
+                          href="https://openrouter.ai"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary underline"
+                        >
+                          openrouter.ai
+                        </a>
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="text_to_sql_model"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Text-to-SQL Model</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a model" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {TEXT_TO_SQL_MODELS.map((model) => (
+                            <SelectItem key={model.id} value={model.id}>
+                              {model.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        Model used for generating SQL from natural language.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="visualization_model"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Visualization Model</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a model" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {VISUALIZATION_MODELS.map((model) => (
+                            <SelectItem key={model.id} value={model.id}>
+                              {model.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        Model used for generating chart configurations.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="conversation_history_limit"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Conversation History Limit</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={50}
+                          placeholder="10"
+                          {...field}
+                          onChange={(e) => field.onChange(parseInt(e.target.value) || 10)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        Number of previous messages to include in AI context (1-50). Higher values provide more context but use more tokens.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </ScrollArea>
+
+            <div className="flex justify-end gap-2 px-6 py-4 border-t">
               <Button
                 type="button"
                 variant="outline"

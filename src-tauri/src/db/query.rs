@@ -61,16 +61,33 @@ async fn execute_postgres_query(
 
     let rows = sqlx::query(query).fetch_all(&pool).await?;
 
-    if rows.is_empty() {
-        return Ok((vec![], vec![], 0));
-    }
+    // Get column names from first row, or try to get column info even with no rows
+    let columns: Vec<String> = if !rows.is_empty() {
+        rows[0]
+            .columns()
+            .iter()
+            .map(|col| col.name().to_string())
+            .collect()
+    } else {
+        // No rows, try to prepare the query to get column metadata
+        // Use fetch_optional which will give us row structure even if empty
+        match sqlx::query(query).fetch_optional(&pool).await {
+            Ok(Some(row)) => {
+                row.columns()
+                    .iter()
+                    .map(|col| col.name().to_string())
+                    .collect()
+            }
+            _ => {
+                // Can't get column info
+                vec![]
+            }
+        }
+    };
 
-    // Get column names
-    let columns: Vec<String> = rows[0]
-        .columns()
-        .iter()
-        .map(|col| col.name().to_string())
-        .collect();
+    if rows.is_empty() {
+        return Ok((columns, vec![], 0));
+    }
 
     // Convert rows to JSON
     let mut result_rows = Vec::new();
@@ -232,16 +249,33 @@ async fn execute_mysql_query(
 
     let rows = sqlx::query(query).fetch_all(&pool).await?;
 
-    if rows.is_empty() {
-        return Ok((vec![], vec![], 0));
-    }
+    // Get column names from first row, or try to get column info even with no rows
+    let columns: Vec<String> = if !rows.is_empty() {
+        rows[0]
+            .columns()
+            .iter()
+            .map(|col| col.name().to_string())
+            .collect()
+    } else {
+        // No rows, try to prepare the query to get column metadata
+        // Use fetch_optional which will give us row structure even if empty
+        match sqlx::query(query).fetch_optional(&pool).await {
+            Ok(Some(row)) => {
+                row.columns()
+                    .iter()
+                    .map(|col| col.name().to_string())
+                    .collect()
+            }
+            _ => {
+                // Can't get column info
+                vec![]
+            }
+        }
+    };
 
-    // Get column names
-    let columns: Vec<String> = rows[0]
-        .columns()
-        .iter()
-        .map(|col| col.name().to_string())
-        .collect();
+    if rows.is_empty() {
+        return Ok((columns, vec![], 0));
+    }
 
     // Convert rows to JSON
     let mut result_rows = Vec::new();

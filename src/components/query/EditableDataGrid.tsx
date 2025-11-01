@@ -346,7 +346,7 @@ export function EditableDataGrid({
         return (
           <div
             className={cn(
-              "group relative",
+              "group relative py-2",
               isEdited && "bg-blue-50 dark:bg-blue-950/30",
               isRowDeleted(rowIndex) && "opacity-50",
               isRowInserted(rowIndex) && "bg-green-50 dark:bg-green-950/30"
@@ -357,7 +357,7 @@ export function EditableDataGrid({
               }
             }}
           >
-            <div className="py-2">{renderCellValue(value, columnName, rowIndex)}</div>
+            {renderCellValue(value, columnName, rowIndex)}
             {!isRowDeleted(rowIndex) && (
               <Button
                 size="icon"
@@ -502,7 +502,7 @@ export function EditableDataGrid({
                     )}
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id} className="p-0">
+                      <TableCell key={cell.id} className={cell.column.id === "actions" ? "py-2" : "p-0"}>
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
                     ))}

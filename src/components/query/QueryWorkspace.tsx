@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { QueryEditor } from "./QueryEditor";
-import { DataGrid } from "./DataGrid";
+import { EditableDataGrid } from "./EditableDataGrid";
 import { TableDataTab } from "./TableDataTab";
 import { ChartRenderer } from "@/components/visualization/ChartRenderer";
 import { AiChatTab } from "@/components/ai/AiChatTab";
@@ -160,9 +160,13 @@ export function QueryWorkspace() {
                       minSize={isMapFullscreen ? 0 : 30}
                       collapsible={true}
                     >
-                      <DataGrid
+                      <EditableDataGrid
                         result={queryTab.result}
                         onGeographicCellClick={setSelectedGeography}
+                        onCommitChanges={async (changes) => {
+                          console.log("Committing changes:", changes);
+                          // TODO: Implement backend persistence
+                        }}
                       />
                     </ResizablePanel>
                     <ResizableHandle withHandle />
@@ -183,9 +187,13 @@ export function QueryWorkspace() {
                 ) : hasVisualization ? (
                   <ResizablePanelGroup direction="horizontal" className="flex-1">
                     <ResizablePanel defaultSize={50} minSize={30}>
-                      <DataGrid
+                      <EditableDataGrid
                         result={queryTab.result}
                         onGeographicCellClick={setSelectedGeography}
+                        onCommitChanges={async (changes) => {
+                          console.log("Committing changes:", changes);
+                          // TODO: Implement backend persistence
+                        }}
                       />
                     </ResizablePanel>
                     <ResizableHandle withHandle />
@@ -194,9 +202,13 @@ export function QueryWorkspace() {
                     </ResizablePanel>
                   </ResizablePanelGroup>
                 ) : (
-                  <DataGrid
+                  <EditableDataGrid
                     result={queryTab.result}
                     onGeographicCellClick={setSelectedGeography}
+                    onCommitChanges={async (changes) => {
+                      console.log("Committing changes:", changes);
+                      // TODO: Implement backend persistence
+                    }}
                   />
                 )}
               </div>
@@ -250,7 +262,13 @@ export function QueryWorkspace() {
           {vizTab.showGrid && vizTab.chartConfig ? (
             <ResizablePanelGroup direction="horizontal" className="flex-1">
               <ResizablePanel defaultSize={50} minSize={30}>
-                <DataGrid result={vizTab.queryResult} />
+                <EditableDataGrid
+                  result={vizTab.queryResult}
+                  onCommitChanges={async (changes) => {
+                    console.log("Committing changes:", changes);
+                    // TODO: Implement backend persistence
+                  }}
+                />
               </ResizablePanel>
               <ResizableHandle withHandle />
               <ResizablePanel defaultSize={50} minSize={30}>

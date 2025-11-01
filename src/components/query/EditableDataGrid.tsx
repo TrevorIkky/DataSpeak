@@ -219,13 +219,13 @@ export function EditableDataGrid({
 
     // Handle NULL
     if (displayValue === null || displayValue === undefined) {
-      return <span className="text-muted-foreground italic">NULL</span>;
+      return <span className="text-muted-foreground italic whitespace-nowrap">NULL</span>;
     }
 
     // Handle boolean
     if (typeof displayValue === "boolean") {
       return (
-        <span className="font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-400">
+        <span className="font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-400 whitespace-nowrap">
           {displayValue.toString()}
         </span>
       );
@@ -234,7 +234,7 @@ export function EditableDataGrid({
     // Handle number
     if (typeof displayValue === "number") {
       return (
-        <span className="font-mono text-purple-700 dark:text-purple-400">
+        <span className="font-mono text-purple-700 dark:text-purple-400 whitespace-nowrap">
           {displayValue.toLocaleString()}
         </span>
       );
@@ -260,11 +260,11 @@ export function EditableDataGrid({
                 });
               }
             }}
-            className="flex items-center gap-2 font-mono text-green-700 dark:text-green-400 text-sm hover:underline cursor-pointer"
+            className="flex items-center gap-2 font-mono text-green-700 dark:text-green-400 text-sm hover:underline cursor-pointer whitespace-nowrap"
             title={`Click to view on map\n\n${displayValue}`}
           >
             <MapPin className="h-3 w-3 flex-shrink-0" />
-            <span className="truncate">{displayText}</span>
+            <span className="truncate max-w-[200px]">{displayText}</span>
           </button>
         );
       }
@@ -276,7 +276,7 @@ export function EditableDataGrid({
 
       if (dateTimePattern.test(displayValue) || datePattern.test(displayValue) || timePattern.test(displayValue)) {
         return (
-          <span className="font-mono text-green-700 dark:text-green-400" title={displayValue}>
+          <span className="font-mono text-green-700 dark:text-green-400 whitespace-nowrap" title={displayValue}>
             {displayValue}
           </span>
         );
@@ -287,7 +287,7 @@ export function EditableDataGrid({
         const displayText =
           displayValue.length > 50 ? displayValue.substring(0, 50) + "..." : displayValue;
         return (
-          <span className="font-mono text-orange-700 dark:text-orange-400 text-xs" title={displayValue}>
+          <span className="font-mono text-orange-700 dark:text-orange-400 text-xs whitespace-nowrap" title={displayValue}>
             {displayText}
           </span>
         );
@@ -297,40 +297,39 @@ export function EditableDataGrid({
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (uuidPattern.test(displayValue)) {
         return (
-          <span className="font-mono text-cyan-700 dark:text-cyan-400 text-sm" title={displayValue}>
+          <span className="font-mono text-cyan-700 dark:text-cyan-400 text-sm whitespace-nowrap" title={displayValue}>
             {displayValue}
           </span>
         );
       }
 
-      // Regular string - truncate if too long
-      if (displayValue.length > 200) {
-        return (
-          <span className="block max-w-xs truncate" title={displayValue}>
-            {displayValue}
-          </span>
-        );
-      }
-
-      return <span className="block max-w-xs">{displayValue}</span>;
+      // Regular string - single line with truncation
+      return (
+        <span className="block truncate max-w-[300px] whitespace-nowrap" title={displayValue}>
+          {displayValue}
+        </span>
+      );
     }
 
     // Handle object (like JSON)
     if (typeof displayValue === "object") {
-      const jsonStr = JSON.stringify(displayValue, null, 2);
-      const displayStr = jsonStr.length > 100 ? JSON.stringify(displayValue) : jsonStr;
+      const jsonStr = JSON.stringify(displayValue);
       return (
         <span
-          className="font-mono text-sm text-indigo-700 dark:text-indigo-400 block max-w-xs truncate"
+          className="font-mono text-sm text-indigo-700 dark:text-indigo-400 block truncate max-w-[300px] whitespace-nowrap"
           title={jsonStr}
         >
-          {displayStr}
+          {jsonStr}
         </span>
       );
     }
 
     // Fallback
-    return <span className="truncate block max-w-xs">{String(displayValue)}</span>;
+    return (
+      <span className="truncate block max-w-[300px] whitespace-nowrap" title={String(displayValue)}>
+        {String(displayValue)}
+      </span>
+    );
   };
 
   // Create columns from query result
@@ -346,7 +345,7 @@ export function EditableDataGrid({
         return (
           <div
             className={cn(
-              "group relative py-2",
+              "group relative py-2 px-3 overflow-hidden",
               isEdited && "bg-blue-50 dark:bg-blue-950/30",
               isRowDeleted(rowIndex) && "opacity-50",
               isRowInserted(rowIndex) && "bg-green-50 dark:bg-green-950/30"
@@ -357,7 +356,9 @@ export function EditableDataGrid({
               }
             }}
           >
-            {renderCellValue(value, columnName, rowIndex)}
+            <div className="overflow-x-auto whitespace-nowrap">
+              {renderCellValue(value, columnName, rowIndex)}
+            </div>
             {!isRowDeleted(rowIndex) && (
               <Button
                 size="icon"

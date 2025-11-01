@@ -1,9 +1,10 @@
 import { Card } from "@/components/ui/card";
 import { ChartRenderer } from "@/components/visualization/ChartRenderer";
 import { DataGrid } from "@/components/query/DataGrid";
+import { MapViewer } from "@/components/map/MapViewer";
 import type { ChatMessage } from "@/types/ai.types";
 import ReactMarkdown from "react-markdown";
-import { TrendingUp, Brain } from "lucide-react";
+import { TrendingUp, Brain, MapPin } from "lucide-react";
 import {
   Accordion,
   AccordionContent,
@@ -47,6 +48,7 @@ export function MessageContent({ message }: MessageContentProps) {
   const hasTableData = message.tableData && message.tableData.rows.length > 0;
   const hasChartData = message.chartData && message.chartData.data.rows.length > 0;
   const hasStatisticData = message.statisticData;
+  const hasMapData = message.mapData && message.mapData.geometry;
 
   const { thinking, finalAnswer } = parseMessageContent(message.content);
 
@@ -130,6 +132,32 @@ export function MessageContent({ message }: MessageContentProps) {
                 {message.statisticData.label}
               </div>
             </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Map data rendering */}
+      {hasMapData && message.mapData && (
+        <Card className="overflow-hidden border-green-200 dark:border-green-800">
+          <div className="bg-green-50 dark:bg-green-950/30 px-4 py-2 border-b border-green-200 dark:border-green-800">
+            <div className="flex items-center gap-2">
+              <MapPin className="h-4 w-4 text-green-600 dark:text-green-400" />
+              <h3 className="text-sm font-semibold text-green-900 dark:text-green-100">
+                {message.mapData.title || "Location"}
+              </h3>
+            </div>
+            {message.mapData.description && (
+              <p className="text-xs text-green-700 dark:text-green-300 mt-1">
+                {message.mapData.description}
+              </p>
+            )}
+          </div>
+          <div className="h-[400px] w-full">
+            <MapViewer
+              geometry={message.mapData.geometry}
+              onClose={() => {}}
+              isFullscreen={false}
+            />
           </div>
         </Card>
       )}

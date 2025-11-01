@@ -1,0 +1,595 @@
+import { useMemo, useState, useRef, useEffect } from "react";
+import {
+  useReactTable,
+  getCoreRowModel,
+  getPaginationRowModel,
+  flexRender,
+  ColumnDef,
+} from "@tanstack/react-table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  MapPin,
+  Trash2,
+  Plus,
+  Save,
+  RotateCcw,
+  Edit3,
+  Check,
+  X,
+} from "lucide-react";
+import type { QueryResult } from "@/types/query.types";
+import { isWKTGeometry, parseWKT } from "@/lib/geoUtils";
+import type { GeographicCell } from "@/types/geography.types";
+import type { DataGridChanges, CellEdit, RowInsert } from "@/types/datagrid.types";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+
+interface EditableDataGridProps {
+  result: QueryResult;
+  onGeographicCellClick?: (cell: GeographicCell) => void;
+  onCommitChanges?: (changes: DataGridChanges) => Promise<void>;
+}
+
+export function EditableDataGrid({
+  result,
+  onGeographicCellClick,
+  onCommitChanges,
+}: EditableDataGridProps) {
+  const [pagination, setPagination] = useState({
+    pageIndex: 0,
+    pageSize: 50,
+  });
+
+  // Track changes
+  const [changes, setChanges] = useState<DataGridChanges>({
+    edits: new Map(),
+    deletes: new Set(),
+    inserts: [],
+  });
+
+  // Editing state
+  const [editingCell, setEditingCell] = useState<{ rowIndex: number; columnName: string } | null>(
+    null
+  );
+  const [editValue, setEditValue] = useState<string>("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus input when editing starts
+  useEffect(() => {
+    if (editingCell && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingCell]);
+
+  // Combine original data with inserts and apply deletes
+  const displayData = useMemo(() => {
+    const data = [...result.rows, ...changes.inserts.map((insert) => insert.rowData)];
+    return data.filter((_, idx) => !changes.deletes.has(idx));
+  }, [result.rows, changes.inserts, changes.deletes]);
+
+  // Get change key for cell
+  const getChangeKey = (rowIndex: number, columnName: string) => {
+    return `${rowIndex}-${columnName}`;
+  };
+
+  // Check if cell is edited
+  const isCellEdited = (rowIndex: number, columnName: string) => {
+    return changes.edits.has(getChangeKey(rowIndex, columnName));
+  };
+
+  // Check if row is deleted
+  const isRowDeleted = (rowIndex: number) => {
+    return changes.deletes.has(rowIndex);
+  };
+
+  // Check if row is newly inserted
+  const isRowInserted = (rowIndex: number) => {
+    return rowIndex >= result.rows.length;
+  };
+
+  // Start editing a cell
+  const startEditing = (rowIndex: number, columnName: string, currentValue: any) => {
+    setEditingCell({ rowIndex, columnName });
+    setEditValue(currentValue === null ? "" : String(currentValue));
+  };
+
+  // Cancel editing
+  const cancelEditing = () => {
+    setEditingCell(null);
+    setEditValue("");
+  };
+
+  // Save cell edit
+  const saveEdit = () => {
+    if (!editingCell) return;
+
+    const { rowIndex, columnName } = editingCell;
+    const oldValue = result.rows[rowIndex]?.[columnName];
+    const newValue = editValue === "" ? null : editValue;
+
+    if (oldValue !== newValue) {
+      const key = getChangeKey(rowIndex, columnName);
+      const newEdits = new Map(changes.edits);
+      newEdits.set(key, { rowIndex, columnName, oldValue, newValue });
+      setChanges({ ...changes, edits: newEdits });
+    }
+
+    cancelEditing();
+  };
+
+  // Delete row
+  const deleteRow = (rowIndex: number) => {
+    const newDeletes = new Set(changes.deletes);
+    newDeletes.add(rowIndex);
+    setChanges({ ...changes, deletes: newDeletes });
+  };
+
+  // Add new row
+  const addRow = () => {
+    const tempId = `temp-${Date.now()}`;
+    const newRow: Record<string, any> = {};
+    result.columns.forEach((col) => {
+      newRow[col] = null;
+    });
+
+    const newInsert: RowInsert = {
+      tempId,
+      rowData: newRow,
+    };
+
+    setChanges({
+      ...changes,
+      inserts: [...changes.inserts, newInsert],
+    });
+  };
+
+  // Reset all changes
+  const resetChanges = () => {
+    setChanges({
+      edits: new Map(),
+      deletes: new Set(),
+      inserts: [],
+    });
+    cancelEditing();
+  };
+
+  // Commit changes
+  const handleCommit = async () => {
+    if (onCommitChanges) {
+      await onCommitChanges(changes);
+      resetChanges();
+    }
+  };
+
+  // Calculate totals
+  const totalChanges = changes.edits.size + changes.deletes.size + changes.inserts.length;
+  const hasChanges = totalChanges > 0;
+
+  // Helper function to render cell values based on type
+  const renderCellValue = (value: any, columnName: string, rowIndex: number) => {
+    // Check if this cell is being edited
+    if (editingCell?.rowIndex === rowIndex && editingCell?.columnName === columnName) {
+      return (
+        <div className="flex items-center gap-1">
+          <Input
+            ref={inputRef}
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveEdit();
+              if (e.key === "Escape") cancelEditing();
+            }}
+            className="h-7 text-sm"
+          />
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={saveEdit}>
+            <Check className="h-3 w-3" />
+          </Button>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={cancelEditing}>
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      );
+    }
+
+    // Get the actual value (might be edited)
+    const changeKey = getChangeKey(rowIndex, columnName);
+    const editedValue = changes.edits.get(changeKey);
+    const displayValue = editedValue ? editedValue.newValue : value;
+
+    // Handle NULL
+    if (displayValue === null || displayValue === undefined) {
+      return <span className="text-muted-foreground italic">NULL</span>;
+    }
+
+    // Handle boolean
+    if (typeof displayValue === "boolean") {
+      return (
+        <span className="font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-400">
+          {displayValue.toString()}
+        </span>
+      );
+    }
+
+    // Handle number
+    if (typeof displayValue === "number") {
+      return (
+        <span className="font-mono text-purple-700 dark:text-purple-400">
+          {displayValue.toLocaleString()}
+        </span>
+      );
+    }
+
+    // Handle string
+    if (typeof displayValue === "string") {
+      // Check for WKT geometry data (PostGIS/MySQL Spatial)
+      if (isWKTGeometry(displayValue)) {
+        const geometry = parseWKT(displayValue);
+        const displayText =
+          displayValue.length > 40 ? displayValue.substring(0, 40) + "..." : displayValue;
+
+        return (
+          <button
+            onClick={() => {
+              if (geometry && onGeographicCellClick) {
+                onGeographicCellClick({
+                  columnName,
+                  rowIndex,
+                  geometry,
+                  rawValue: displayValue,
+                });
+              }
+            }}
+            className="flex items-center gap-2 font-mono text-green-700 dark:text-green-400 text-sm hover:underline cursor-pointer"
+            title={`Click to view on map\n\n${displayValue}`}
+          >
+            <MapPin className="h-3 w-3 flex-shrink-0" />
+            <span className="truncate">{displayText}</span>
+          </button>
+        );
+      }
+
+      // Check for date/timestamp patterns (ISO 8601 format)
+      const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+      const timePattern = /^\d{2}:\d{2}:\d{2}/;
+      const dateTimePattern = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/;
+
+      if (dateTimePattern.test(displayValue) || datePattern.test(displayValue) || timePattern.test(displayValue)) {
+        return (
+          <span className="font-mono text-green-700 dark:text-green-400" title={displayValue}>
+            {displayValue}
+          </span>
+        );
+      }
+
+      // Check for hex binary data
+      if (displayValue.startsWith("0x")) {
+        const displayText =
+          displayValue.length > 50 ? displayValue.substring(0, 50) + "..." : displayValue;
+        return (
+          <span className="font-mono text-orange-700 dark:text-orange-400 text-xs" title={displayValue}>
+            {displayText}
+          </span>
+        );
+      }
+
+      // Check for UUID pattern
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (uuidPattern.test(displayValue)) {
+        return (
+          <span className="font-mono text-cyan-700 dark:text-cyan-400 text-sm" title={displayValue}>
+            {displayValue}
+          </span>
+        );
+      }
+
+      // Regular string - truncate if too long
+      if (displayValue.length > 200) {
+        return (
+          <span className="block max-w-xs truncate" title={displayValue}>
+            {displayValue}
+          </span>
+        );
+      }
+
+      return <span className="block max-w-xs">{displayValue}</span>;
+    }
+
+    // Handle object (like JSON)
+    if (typeof displayValue === "object") {
+      const jsonStr = JSON.stringify(displayValue, null, 2);
+      const displayStr = jsonStr.length > 100 ? JSON.stringify(displayValue) : jsonStr;
+      return (
+        <span
+          className="font-mono text-sm text-indigo-700 dark:text-indigo-400 block max-w-xs truncate"
+          title={jsonStr}
+        >
+          {displayStr}
+        </span>
+      );
+    }
+
+    // Fallback
+    return <span className="truncate block max-w-xs">{String(displayValue)}</span>;
+  };
+
+  // Create columns from query result
+  const columns = useMemo<ColumnDef<Record<string, any>>[]>(() => {
+    const dataColumns: ColumnDef<Record<string, any>>[] = result.columns.map((columnName) => ({
+      accessorKey: columnName,
+      header: columnName,
+      cell: ({ getValue, row }) => {
+        const rowIndex = row.index;
+        const value = getValue();
+        const isEdited = isCellEdited(rowIndex, columnName);
+
+        return (
+          <div
+            className={cn(
+              "group relative",
+              isEdited && "bg-blue-50 dark:bg-blue-950/30",
+              isRowDeleted(rowIndex) && "opacity-50",
+              isRowInserted(rowIndex) && "bg-green-50 dark:bg-green-950/30"
+            )}
+            onDoubleClick={() => {
+              if (!isRowDeleted(rowIndex)) {
+                startEditing(rowIndex, columnName, value);
+              }
+            }}
+          >
+            <div className="py-2">{renderCellValue(value, columnName, rowIndex)}</div>
+            {!isRowDeleted(rowIndex) && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={() => startEditing(rowIndex, columnName, value)}
+              >
+                <Edit3 className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+        );
+      },
+    }));
+
+    // Add actions column
+    dataColumns.push({
+      id: "actions",
+      header: () => <div className="text-center">Actions</div>,
+      cell: ({ row }) => {
+        const rowIndex = row.index;
+        const isDeleted = isRowDeleted(rowIndex);
+
+        return (
+          <div className="flex items-center justify-center gap-1">
+            <Button
+              size="icon"
+              variant="ghost"
+              className={cn(
+                "h-7 w-7",
+                isDeleted
+                  ? "text-green-600 hover:text-green-700 dark:text-green-400"
+                  : "text-destructive hover:text-destructive/80"
+              )}
+              onClick={() => {
+                if (isDeleted) {
+                  const newDeletes = new Set(changes.deletes);
+                  newDeletes.delete(rowIndex);
+                  setChanges({ ...changes, deletes: newDeletes });
+                } else {
+                  deleteRow(rowIndex);
+                }
+              }}
+              title={isDeleted ? "Restore row" : "Delete row"}
+            >
+              {isDeleted ? <RotateCcw className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+        );
+      },
+    });
+
+    return dataColumns;
+  }, [result.columns, changes, editingCell, onGeographicCellClick]);
+
+  const table = useReactTable({
+    data: displayData,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    onPaginationChange: setPagination,
+    state: {
+      pagination,
+    },
+  });
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header with change summary and actions */}
+      <div className="flex items-center justify-between px-4 py-2 border-b bg-card">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold">
+            {result.row_count} row{result.row_count !== 1 ? "s" : ""}
+          </span>
+          <span className="text-sm text-muted-foreground">in {result.execution_time_ms}ms</span>
+          {hasChanges && (
+            <div className="flex items-center gap-2 ml-4">
+              <Badge variant="secondary" className="text-xs">
+                {changes.edits.size} edited
+              </Badge>
+              <Badge variant="destructive" className="text-xs">
+                {changes.deletes.size} deleted
+              </Badge>
+              <Badge variant="default" className="text-xs bg-green-600">
+                {changes.inserts.length} added
+              </Badge>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={addRow} className="h-8">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Row
+          </Button>
+          {hasChanges && (
+            <>
+              <Button size="sm" variant="outline" onClick={resetChanges} className="h-8">
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Reset
+              </Button>
+              <Button size="sm" onClick={handleCommit} className="h-8">
+                <Save className="h-4 w-4 mr-2" />
+                Commit ({totalChanges})
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="flex-1 overflow-auto">
+        <Table>
+          <TableHeader className="sticky top-0 bg-card z-10">
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <TableHead key={header.id} className="font-semibold">
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(header.column.columnDef.header, header.getContext())}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {table.getRowModel().rows?.length ? (
+              table.getRowModel().rows.map((row) => {
+                const rowIndex = row.index;
+                const isDeleted = isRowDeleted(rowIndex);
+                const isNew = isRowInserted(rowIndex);
+
+                return (
+                  <TableRow
+                    key={row.id}
+                    data-state={row.getIsSelected() && "selected"}
+                    className={cn(
+                      "hover:bg-muted/50",
+                      isDeleted && "line-through opacity-60 bg-red-50 dark:bg-red-950/20",
+                      isNew && "bg-green-50 dark:bg-green-950/20"
+                    )}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id} className="p-0">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                );
+              })
+            ) : (
+              <TableRow>
+                <TableCell colSpan={columns.length} className="h-24 text-center">
+                  No results.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Pagination */}
+      <div className="flex items-center justify-between px-4 py-3 border-t bg-card">
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-muted-foreground">
+            Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-muted-foreground whitespace-nowrap">Rows per page</p>
+            <Select
+              value={`${table.getState().pagination.pageSize}`}
+              onValueChange={(value) => {
+                table.setPageSize(Number(value));
+              }}
+            >
+              <SelectTrigger className="h-8 w-[70px]">
+                <SelectValue placeholder={table.getState().pagination.pageSize} />
+              </SelectTrigger>
+              <SelectContent side="top">
+                {[10, 20, 50, 100, 200].map((pageSize) => (
+                  <SelectItem key={pageSize} value={`${pageSize}`}>
+                    {pageSize}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => table.firstPage()}
+              disabled={!table.getCanPreviousPage()}
+            >
+              <ChevronsLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => table.previousPage()}
+              disabled={!table.getCanPreviousPage()}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => table.nextPage()}
+              disabled={!table.getCanNextPage()}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => table.lastPage()}
+              disabled={!table.getCanNextPage()}
+            >
+              <ChevronsRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

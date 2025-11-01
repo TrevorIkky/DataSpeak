@@ -1,3 +1,6 @@
+import type { QueryResult } from "./query.types";
+import type { GeometryData } from "./geography.types";
+
 export type OpenRouterModel = {
   id: string;
   name: string;
@@ -51,14 +54,19 @@ export type ChatMessage = {
   };
   actions?: MessageAction[];
   // Enhanced fields for inline rendering
-  tableData?: import('./query.types').QueryResult;
+  tableData?: QueryResult;
   chartData?: {
     config: VisualizationConfig;
-    data: import('./query.types').QueryResult;
+    data: QueryResult;
   };
   statisticData?: {
     value: number | string;
     label: string;
+  };
+  mapData?: {
+    geometry: GeometryData;
+    title?: string;
+    description?: string;
   };
 };
 
@@ -91,19 +99,26 @@ export type AiTokenPayload = {
 
 export type AiTableDataPayload = {
   session_id: string;
-  data: import('./query.types').QueryResult;
+  data: QueryResult;
 };
 
 export type AiChartDataPayload = {
   session_id: string;
   config: VisualizationConfig;
-  data: import('./query.types').QueryResult;
+  data: QueryResult;
 };
 
 export type AiStatisticPayload = {
   session_id: string;
   value: number | string;
   label: string;
+};
+
+export type AiMapDataPayload = {
+  session_id: string;
+  geometry: GeometryData;
+  title?: string;
+  description?: string;
 };
 
 export type AiCompletePayload = {

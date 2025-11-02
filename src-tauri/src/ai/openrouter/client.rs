@@ -21,16 +21,6 @@ impl OpenRouterClient {
         }
     }
 
-    /// Call OpenRouter API without streaming
-    pub async fn chat(
-        &self,
-        model: &str,
-        messages: &[crate::ai::agent::Message],
-        temperature: Option<f32>,
-    ) -> AppResult<String> {
-        self.chat_with_format(model, messages, temperature, None, None).await
-    }
-
     /// Call OpenRouter API with tools (returns full response for tool calls)
     pub async fn chat_with_tools(
         &self,
@@ -50,6 +40,8 @@ impl OpenRouterClient {
             stream: Some(false),
             response_format: None,
             tools: Some(tools),
+            // Disable parallel tool calls for SQL - queries should run sequentially
+            parallel_tool_calls: Some(false),
         };
 
         let response = self
@@ -103,6 +95,7 @@ impl OpenRouterClient {
             stream: Some(false),
             response_format,
             tools,
+            parallel_tool_calls: None,
         };
 
         let response = self
@@ -158,6 +151,7 @@ impl OpenRouterClient {
             stream: Some(true),
             response_format: None,
             tools: None,
+            parallel_tool_calls: None,
         };
 
         let response = self

@@ -1,17 +1,26 @@
 import { useState } from "react";
 import { Play, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { SqlAutocompleteTextarea } from "./SqlAutocompleteTextarea";
 import { useQueryStore } from "@/stores/queryStore";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useSchemaStore } from "@/stores/schemaStore";
 
 export function QueryEditor() {
   const { activeConnection } = useConnectionStore();
   const { tabs, activeTabId, updateTabQuery, executeQuery } = useQueryStore();
+  const { schema, keywords, fetchKeywords } = useSchemaStore();
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const queryTab = activeTab?.type === 'query' ? activeTab : null;
   const [query, setQuery] = useState(queryTab?.query || "");
+
+  // Fetch keywords when user starts typing
+  const handleFirstKeystroke = () => {
+    if (activeConnection?.id && keywords.length === 0) {
+      fetchKeywords(activeConnection.id);
+    }
+  };
 
   const handleQueryChange = (value: string) => {
     setQuery(value);
@@ -51,12 +60,15 @@ export function QueryEditor() {
       </div>
 
       <div className="flex-1 p-4">
-        <Textarea
+        <SqlAutocompleteTextarea
           value={query}
-          onChange={(e) => handleQueryChange(e.target.value)}
+          onChange={handleQueryChange}
           placeholder="Enter your SQL query here...&#10;&#10;Example: SELECT * FROM users WHERE active = true"
           className="h-full font-mono text-sm resize-none"
           disabled={!activeConnection}
+          schema={schema}
+          keywords={keywords}
+          onFirstKeystroke={handleFirstKeystroke}
         />
       </div>
     </div>

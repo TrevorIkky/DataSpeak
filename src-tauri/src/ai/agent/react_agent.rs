@@ -1,4 +1,3 @@
-use super::nodes::*;
 use super::state::*;
 use crate::ai::classification;
 use crate::ai::openrouter::OpenRouterClient;
@@ -174,8 +173,17 @@ pub async fn run_react_agent(
                 ).await {
                     Ok(result) => result,
                     Err(e) => {
-                        // Tool execution failed - add error to conversation so model can retry
-                        let error_msg = format!("SQL execution failed: {}. Please check your query syntax and try again.", e);
+                        // Tool execution failed - provide helpful error message
+                        let error_msg = format!(
+                            "SQL execution failed: {}\n\nCommon fixes:\n\
+                            - Check for typos in SQL keywords (SELECT, FROM, WHERE, etc.)\n\
+                            - Verify table and column names exist in the schema\n\
+                            - Ensure LIMIT clause is present (required, max 100)\n\
+                            - Check for proper quote usage (single quotes for strings)\n\
+                            - Verify JOIN conditions reference valid columns\n\
+                            Please review the error, check the schema, and try again with a corrected query.",
+                            e
+                        );
 
                         messages.push(Message::tool(error_msg.clone(), tool_call.id.clone()));
 
@@ -186,30 +194,24 @@ pub async fn run_react_agent(
 
                 // Emit data events if we have query results
                 if let Some(data) = &tool_result.data {
-                    // Emit table data
-                    app.emit(
-                        "ai_table_data",
-                        serde_json::json!({
-                            "session_id": session_id,
-                            "data": data,
-                        }),
-                    )?;
+                    // Determine what to emit based on question type and data characteristics
+                    let should_emit_table = should_show_table(&question_type, data);
+                    let should_emit_chart = should_show_chart(&question_type, data);
+                    let should_emit_statistic = should_show_statistic(&question_type, data);
 
-                    // Try to generate visualization for chart-appropriate question types
-                    if matches!(question_type, QuestionType::TemporalChart | QuestionType::CategoryChart) {
-                        if let Ok(viz_config) = visualization::generate_config(data, &question_type) {
-                            app.emit(
-                                "ai_chart_data",
-                                serde_json::json!({
-                                    "session_id": session_id,
-                                    "config": viz_config,
-                                    "data": data,
-                                }),
-                            )?;
-                        }
-                    } else if data.row_count > 1 && data.columns.len() >= 2 {
-                        // Auto-detect visualization potential for other question types
-                        // if we have at least 2 columns and multiple rows
+                    // Emit table data (conditionally)
+                    if should_emit_table {
+                        app.emit(
+                            "ai_table_data",
+                            serde_json::json!({
+                                "session_id": session_id,
+                                "data": data,
+                            }),
+                        )?;
+                    }
+
+                    // Try to generate visualization (conditionally)
+                    if should_emit_chart {
                         if let Ok(viz_config) = visualization::generate_config(data, &question_type) {
                             app.emit(
                                 "ai_chart_data",
@@ -222,8 +224,8 @@ pub async fn run_react_agent(
                         }
                     }
 
-                    // Emit statistic if single value
-                    if matches!(question_type, QuestionType::Statistic) && data.row_count == 1 {
+                    // Emit statistic (conditionally)
+                    if should_emit_statistic {
                         if let Some(first_row) = data.rows.first() {
                             if let Some(first_col) = data.columns.first() {
                                 if let Some(value) = first_row.get(first_col) {
@@ -309,4 +311,76 @@ fn format_schema_for_ai(schema_data: &schema::Schema, db_type: &crate::db::conne
     }
 
     output
+}
+
+/// Determine if table should be shown based on question type and data
+fn should_show_table(question_type: &QuestionType, data: &crate::db::query::QueryResult) -> bool {
+    match question_type {
+        // Always show table for explicit table view requests
+        QuestionType::TableView => true,
+
+        // For statistics, only show table if multiple rows/columns (not just a single number)
+        QuestionType::Statistic => {
+            // If it's a single value (1 row, 1 col), don't show table (statistic card is enough)
+            !(data.row_count == 1 && data.columns.len() == 1)
+        },
+
+        // For temporal/category charts, show table if visualization fails or data is simple
+        QuestionType::TemporalChart | QuestionType::CategoryChart => {
+            // Show table if we have reasonable amount of data to display
+            // Skip if it's a single aggregate value
+            data.row_count > 1 || data.columns.len() > 2
+        },
+
+        // For complex queries, always show table
+        QuestionType::Complex => true,
+
+        // General questions shouldn't have data
+        QuestionType::General => false,
+    }
+}
+
+/// Determine if chart should be shown based on question type and data
+fn should_show_chart(question_type: &QuestionType, data: &crate::db::query::QueryResult) -> bool {
+    match question_type {
+        // Explicit chart requests should attempt visualization
+        QuestionType::TemporalChart | QuestionType::CategoryChart => true,
+
+        // For table views, don't auto-generate charts
+        QuestionType::TableView => false,
+
+        // For statistics, don't show charts
+        QuestionType::Statistic => false,
+
+        // For complex queries, try if we have suitable data (2+ cols, multiple rows)
+        QuestionType::Complex => data.row_count > 1 && data.columns.len() >= 2,
+
+        // General questions shouldn't have data
+        QuestionType::General => false,
+    }
+}
+
+/// Determine if statistic card should be shown
+fn should_show_statistic(question_type: &QuestionType, data: &crate::db::query::QueryResult) -> bool {
+    // Only show statistic card for explicit statistic questions with a single value
+    matches!(question_type, QuestionType::Statistic)
+        && data.row_count == 1
+        && data.columns.len() == 1
+}
+
+/// Emit completion event
+async fn emit_complete(
+    app: &AppHandle,
+    session_id: &str,
+    answer: &str,
+) -> AppResult<()> {
+    app.emit(
+        "ai_complete",
+        serde_json::json!({
+            "session_id": session_id,
+            "answer": answer,
+        }),
+    )?;
+
+    Ok(())
 }

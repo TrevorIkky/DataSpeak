@@ -4,7 +4,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { ChatMessages } from "./ChatMessages";
 import { AiChatInput } from "./AiChatInput";
 import { EmptyState } from "./EmptyState";
-import { Loader2, AlertCircle, X } from "lucide-react";
+import { AlertCircle, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
@@ -49,13 +49,7 @@ export function AiChatTab() {
           <EmptyState />
         ) : (
           <div className="h-full overflow-y-auto p-4">
-            <ChatMessages messages={session.messages} />
-            {isGenerating && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground mt-4">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>AI is thinking...</span>
-              </div>
-            )}
+            <ChatMessages messages={session.messages} isGenerating={isGenerating} />
           </div>
         )}
       </div>

@@ -1,4 +1,4 @@
-import type { Connection, Schema, ConnectionStatus } from "@/types/database.types";
+import type { Connection, Schema, ConnectionStatus, SqlKeyword } from "@/types/database.types";
 import type { AppSettings } from "@/types/settings.types";
 import type { Tab } from "@/types/query.types";
 import type { GeographicCell } from "@/types/geography.types";
@@ -27,9 +27,12 @@ export interface IConnectionStore {
 
 export interface ISchemaStore {
   schema: Schema | null;
+  keywords: SqlKeyword[];
   isLoading: boolean;
+  isLoadingKeywords: boolean;
   error: string | null;
   loadSchema: (connectionId: string) => Promise<void>;
+  fetchKeywords: (connectionId: string) => Promise<void>;
   clearSchema: () => void;
 }
 
@@ -62,6 +65,7 @@ export interface IUIStore {
   popoverOpen: boolean;
   selectedGeography: GeographicCell | null;
   isMapFullscreen: boolean;
+  openConnectionId: string | null;
   toggleSidebar: () => void;
   setSettingsDialogOpen: (open: boolean) => void;
   setConnectionDialogOpen: (open: boolean, editingConnectionId?: string | null) => void;
@@ -75,4 +79,5 @@ export interface IUIStore {
   setPopoverOpen: (open: boolean) => void;
   setSelectedGeography: (geography: GeographicCell | null) => void;
   setIsMapFullscreen: (fullscreen: boolean) => void;
+  setOpenConnectionId: (connectionId: string | null) => void;
 }

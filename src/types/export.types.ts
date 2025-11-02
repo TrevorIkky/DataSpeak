@@ -10,6 +10,7 @@ export type ExportProgress = {
   current: number;
   total: number;
   status: string;
+  cancelled: boolean;
 };
 
 export type ImportOptions = {
@@ -24,4 +25,5 @@ export type ImportProgress = {
   current: number;
   total: number;
   status: string;
+  cancelled: boolean;
 };

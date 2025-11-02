@@ -39,7 +39,8 @@ export const useConnectionStore = create<IConnectionStore>((set, get) => ({
   updateConnection: async (id: string, connection: Partial<Connection>) => {
     set({ isLoading: true });
     try {
-      const updated = await invoke<Connection>("update_connection", { id, connection });
+      // Backend expects a full Connection object, not separate id and connection params
+      const updated = await invoke<Connection>("update_connection", { connection });
       const connections = get().connections.map((c) => (c.id === id ? updated : c));
 
       // Update active connection if it's the one being edited

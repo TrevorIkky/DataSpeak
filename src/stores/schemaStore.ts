@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Schema, Table } from "@/types/database.types";
+import type { Schema, Table, SqlKeyword } from "@/types/database.types";
 import type { ISchemaStore } from "@/interfaces/store.interface";
 import { ErrorHandler } from "@/lib/ErrorHandler";
 
@@ -13,15 +13,23 @@ interface SchemaLoadProgress {
 
 export const useSchemaStore = create<ISchemaStore>((set, get) => ({
   schema: null,
+  keywords: [],
   isLoading: false,
+  isLoadingKeywords: false,
   error: null,
 
   loadSchema: async (connectionId: string) => {
     set({ isLoading: true, error: null, schema: null });
 
+    // Use a Map to track unique tables by name (prevents duplicates)
+    const tablesMap = new Map<string, Table>();
+
     // Listen for progressive schema loading events
     const unlisten = await listen<SchemaLoadProgress>("schema-load-progress", (event) => {
       const { table } = event.payload;
+
+      // Add or update table in the map (prevents duplicates)
+      tablesMap.set(table.name, table);
 
       const currentSchema = get().schema;
       if (!currentSchema) {
@@ -29,15 +37,15 @@ export const useSchemaStore = create<ISchemaStore>((set, get) => ({
         set({
           schema: {
             database_name: "",
-            tables: [table],
+            tables: Array.from(tablesMap.values()),
           },
         });
       } else {
-        // Add table to existing schema
+        // Update schema with all tables from the map
         set({
           schema: {
             ...currentSchema,
-            tables: [...currentSchema.tables, table],
+            tables: Array.from(tablesMap.values()),
           },
         });
       }
@@ -46,12 +54,9 @@ export const useSchemaStore = create<ISchemaStore>((set, get) => ({
     try {
       const schema = await invoke<Schema>("get_schema", { connectionId });
 
-      // Update with final schema (includes database name)
+      // Update with final schema (use the complete schema from backend)
       set({
-        schema: {
-          ...schema,
-          tables: get().schema?.tables || schema.tables,
-        },
+        schema: schema,
         isLoading: false
       });
 
@@ -67,7 +72,20 @@ export const useSchemaStore = create<ISchemaStore>((set, get) => ({
     }
   },
 
+  fetchKeywords: async (connectionId: string) => {
+    set({ isLoadingKeywords: true });
+
+    try {
+      const keywords = await invoke<SqlKeyword[]>("get_sql_keywords", { connectionId });
+      set({ keywords, isLoadingKeywords: false });
+    } catch (error) {
+      // If fetching keywords fails, just set empty array and log the error
+      console.error("Failed to fetch SQL keywords:", error);
+      set({ keywords: [], isLoadingKeywords: false });
+    }
+  },
+
   clearSchema: () => {
-    set({ schema: null, error: null });
+    set({ schema: null, keywords: [], error: null });
   },
 }));

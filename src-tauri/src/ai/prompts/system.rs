@@ -10,7 +10,7 @@ The user is greeting you or asking a general question that doesn't require datab
 Respond in a warm, helpful, and concise manner.
 
 For greetings: Be friendly and let them know you're ready to help analyze their data.
-For questions about your capabilities: Explain that you can help them query and visualize their database data.
+For questions about your capabilities: Explain that you can help them query and analyze their database data.
 
 RESPONSE FORMAT:
 Final Answer: [Your friendly, concise response]
@@ -28,15 +28,17 @@ You have access to the execute_sql tool to run SELECT queries on the database.
 
 INSTRUCTIONS:
 1. Analyze the user's question carefully
-2. Write a SQL query to get the needed data (SELECT only, max 100 rows with LIMIT)
-3. Call execute_sql with your query
-4. Once you have the results, provide a clear, concise answer to the user
+2. Determine the best approach to answer their question based on available tools
+3. Write a SQL query to get the needed data (SELECT only, max 100 rows with LIMIT)
+4. Call execute_sql with your query
+5. Once you have the results, provide a clear, concise answer to the user
 
 RULES:
 - Only SELECT queries allowed (no INSERT, UPDATE, DELETE, DROP, ALTER, CREATE)
 - Always include LIMIT clause (maximum 100 rows)
 - Use correct SQL syntax for the database shown in schema
-- Keep answers brief and focused on what the user asked"#,
+- Keep answers brief and focused on what the user asked
+- Let the data guide your response - not all data needs visualization"#,
         schema
     );
 
@@ -44,19 +46,19 @@ RULES:
     match question_type {
         QuestionType::General => unreachable!(), // Already handled above
         QuestionType::TableView => {
-            format!("{}\n\nSPECIAL INSTRUCTION: The user wants to view table data. Return rows from the appropriate table with SELECT. Include relevant columns and use LIMIT appropriately.", base)
+            format!("{}\n\nCONTEXT: The user wants to view table data. Query the appropriate table with SELECT, including relevant columns and using LIMIT appropriately.", base)
         }
         QuestionType::TemporalChart => {
-            format!("{}\n\nSPECIAL INSTRUCTION: The user wants time-series data for visualization. Your query should:\n- Include a date/time column\n- Aggregate data by time period if needed (day, week, month)\n- Order by date\n- Include count or sum for the metric being tracked\n\nAVAILABLE CHART TYPES:\n- line: Best for trends over time\n- area: Emphasize magnitude/volume over time\n- bar: Discrete time comparisons", base)
+            format!("{}\n\nCONTEXT: The user's question involves time-series or temporal data. Your query should:\n- Include a date/time column if analyzing trends\n- Aggregate data by time period if appropriate (day, week, month)\n- Order by date when relevant\n- Include the metrics being tracked\n\nDecide based on the question whether visualization would be helpful.", base)
         }
         QuestionType::CategoryChart => {
-            format!("{}\n\nSPECIAL INSTRUCTION: The user wants categorical data for visualization. Your query should:\n- Group by the category column\n- Include aggregations (COUNT, SUM, AVG) for the metric\n- Order by the metric to show top categories\n\nAVAILABLE CHART TYPES:\n- bar: Best for comparing categories\n- pie/radial: Good for part-to-whole with <7 categories\n- radar: Compare multiple metrics across categories", base)
+            format!("{}\n\nCONTEXT: The user's question involves categorical or grouped data. Your query should:\n- Group by the category column when appropriate\n- Include aggregations (COUNT, SUM, AVG) if analyzing metrics\n- Order results logically (by metric or category)\n\nDecide based on the question and data whether visualization would be helpful.", base)
         }
         QuestionType::Statistic => {
-            format!("{}\n\nSPECIAL INSTRUCTION: The user wants a specific statistic or count. Your query should use aggregate functions (COUNT, SUM, AVG, MIN, MAX) to calculate the exact number requested.", base)
+            format!("{}\n\nCONTEXT: The user wants a specific statistic or count. Your query should use aggregate functions (COUNT, SUM, AVG, MIN, MAX) to calculate the requested value.", base)
         }
         QuestionType::Complex => {
-            format!("{}\n\nSPECIAL INSTRUCTION: This is a complex analytical question. Break it down into steps:\n1. Understand what data is needed\n2. Query the necessary information (you may need multiple queries)\n3. Analyze and synthesize the results\n4. Provide a comprehensive answer", base)
+            format!("{}\n\nCONTEXT: This is a complex analytical question. Break it down into steps:\n1. Understand what data is needed\n2. Query the necessary information (you may need multiple queries if needed)\n3. Analyze and synthesize the results\n4. Provide a comprehensive answer based on the data", base)
         }
     }
 }
@@ -68,20 +70,20 @@ pub fn build_classification_prompt() -> &'static str {
 1. GENERAL: Greetings, pleasantries, or non-data questions
    Examples: "hi", "hello", "how are you", "thanks", "what can you do"
 
-2. TABLE_VIEW: User wants to see/display/list rows from a table (but NOT visualize)
-   Examples: "show me users", "display all products", "list orders"
+2. TABLE_VIEW: User wants to see/display/list rows from a table
+   Examples: "show me users", "display all products", "list orders", "view customers"
 
-3. TEMPORAL_CHART: User wants to see data over time (trend, timeline)
-   Examples: "users joined over time", "sales last 30 days", "growth trend"
+3. TEMPORAL_CHART: User's question involves time-series or temporal data
+   Examples: "users joined over time", "sales last 30 days", "growth trend", "monthly signups"
 
-4. CATEGORY_CHART: User wants to see distribution by category OR requests visualization (chart/graph/plot)
-   Examples: "users by country", "products by category", "visualize permissions", "bar chart of sales", "plot data"
+4. CATEGORY_CHART: User's question involves categorical grouping or distribution
+   Examples: "users by country", "products by category", "sales by region", "distribution of statuses"
 
-5. STATISTIC: User wants a single number (count, sum, average) without visualization
-   Examples: "how many users", "total revenue", "average order value"
+5. STATISTIC: User wants a specific number, count, or metric
+   Examples: "how many users", "total revenue", "average order value", "sum of sales"
 
 6. COMPLEX: Multi-step analysis or complex aggregation
-   Examples: "top 10 customers by lifetime value", "cohort analysis"
+   Examples: "top 10 customers by lifetime value", "cohort analysis", "retention rate"
 
 Respond with ONLY the category name, nothing else."#
 }

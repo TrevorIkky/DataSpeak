@@ -2,8 +2,6 @@
 
 @plugin "tailwindcss-animate";
 
-@custom-variant dark (&:is(.dark *));
-
 @theme {
   --color-background: 0 0% 100%;
   --color-foreground: 222.2 84% 4.9%;
@@ -243,5 +241,29 @@
   .leaflet-control-zoom a:last-child {
     border-bottom-left-radius: var(--radius);
     border-bottom-right-radius: var(--radius);
+  }
+
+  /* Shine animation for AI thinking */
+  @keyframes shine {
+    0% {
+      background-position: 200% 0%;
+    }
+    100% {
+      background-position: -200% 0%;
+    }
+  }
+
+  .shine-text {
+    color: transparent;
+    background-clip: text !important;
+    animation: shine 1.5s linear infinite;
+  }
+
+  .dark .shine-text {
+    background: radial-gradient(circle at center, rgb(24 24 27 / 85%), transparent) -200% 50% / 200% 100% no-repeat, #f4f4f5;
+  }
+
+  .light .shine-text {
+    background: radial-gradient(circle at center, rgba(255, 255, 255, 0.85), #f000) -200% 50% / 200% 100% no-repeat, #000;
   }
 }

@@ -6,12 +6,22 @@ import { MessageContent } from "./MessageContent";
 
 interface ChatMessagesProps {
   messages: ChatMessage[];
+  isGenerating?: boolean;
 }
 
-export function ChatMessages({ messages }: ChatMessagesProps) {
+export function ChatMessages({ messages, isGenerating }: ChatMessagesProps) {
+  // Check if the last message is an empty assistant message (thinking state)
+  const lastMessage = messages[messages.length - 1];
+  const isThinking = isGenerating && lastMessage?.role === 'assistant' && !lastMessage?.content;
+
+  // Filter out empty assistant messages when thinking
+  const displayMessages = isThinking
+    ? messages.slice(0, -1)
+    : messages;
+
   return (
     <div className="space-y-4">
-      {messages.map((message) => (
+      {displayMessages.map((message) => (
         <div
           key={message.id}
           className={cn(
@@ -74,6 +84,28 @@ export function ChatMessages({ messages }: ChatMessagesProps) {
           </div>
         </div>
       ))}
+
+      {/* Thinking indicator */}
+      {isThinking && (
+        <div className="flex flex-col items-start">
+          <Card className="p-4 max-w-[85%] bg-muted border-border shadow-sm">
+            <div className="relative inline-block">
+              <span className="text-sm font-medium shine-text">
+                AI is thinking...
+              </span>
+            </div>
+          </Card>
+          <div className="flex items-center gap-2 mt-1 px-1">
+            <span className="text-xs font-medium text-muted-foreground">AI Assistant</span>
+            <span className="text-xs text-muted-foreground">
+              {new Date().toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

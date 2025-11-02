@@ -14,57 +14,6 @@ pub enum QuestionType {
     Complex,         // Multi-step analysis
 }
 
-/// Agent state maintaining conversation context and execution status
-#[derive(Debug, Clone)]
-pub struct AgentState {
-    pub session_id: String,
-    pub connection_id: String,
-    pub question: String,
-    pub question_type: QuestionType,
-    pub schema: String,
-    pub messages: Vec<Message>,
-    pub iterations: u8,
-    pub max_iterations: u8,
-    pub tool_results: Vec<ToolResult>,
-}
-
-impl AgentState {
-    pub fn new(
-        session_id: String,
-        connection_id: String,
-        question: String,
-        question_type: QuestionType,
-        schema: String,
-    ) -> Self {
-        Self {
-            session_id,
-            connection_id,
-            question,
-            question_type,
-            schema,
-            messages: Vec::new(),
-            iterations: 0,
-            max_iterations: 5,
-            tool_results: Vec::new(),
-        }
-    }
-
-    pub fn add_message(&mut self, message: Message) {
-        self.messages.push(message);
-    }
-
-    pub fn add_tool_result(&mut self, result: ToolResult) {
-        self.tool_results.push(result);
-    }
-
-    pub fn increment_iteration(&mut self) {
-        self.iterations += 1;
-    }
-
-    pub fn has_reached_max_iterations(&self) -> bool {
-        self.iterations >= self.max_iterations
-    }
-}
 
 /// Message in the conversation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,23 +84,6 @@ pub enum MessageRole {
 pub struct ToolResult {
     pub observation: String,
     pub data: Option<QueryResult>,
-    pub execution_time_ms: u128,
-}
-
-/// Decision from routing node
-#[derive(Debug)]
-pub enum Decision {
-    FinalAnswer(String),
-    ToolCall(ToolCall),
-    Continue,
-    Error(String),
-}
-
-/// Parsed tool call from LLM response
-#[derive(Debug, Clone)]
-pub struct ToolCall {
-    pub tool: Tool,
-    pub raw_response: String,
 }
 
 /// Available tools for the agent

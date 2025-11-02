@@ -71,11 +71,11 @@ async fn save_connection(
     // Save to in-memory storage
     state.connections.save_connection(connection.clone())?;
 
-    // Update metadata index for Stronghold
+    // Persist full connection data to Stronghold
     let stronghold = state.stronghold.lock().map_err(|e| {
         error::AppError::StorageError(format!("Failed to lock stronghold storage: {}", e))
     })?;
-    stronghold.update_index_on_save(&connection)?;
+    stronghold.save_connection(&connection)?;
 
     Ok(connection)
 }
@@ -90,11 +90,11 @@ async fn delete_connection(state: State<'_, AppState>, id: String) -> AppResult<
     // Delete from in-memory storage
     state.connections.delete_connection(&id)?;
 
-    // Update metadata index for Stronghold
+    // Delete persisted connection data from Stronghold
     let stronghold = state.stronghold.lock().map_err(|e| {
         error::AppError::StorageError(format!("Failed to lock stronghold storage: {}", e))
     })?;
-    stronghold.update_index_on_delete(&id)?;
+    stronghold.delete_connection(&id)?;
 
     Ok(())
 }
@@ -109,11 +109,11 @@ async fn update_connection(
     // Save to in-memory storage
     state.connections.save_connection(connection.clone())?;
 
-    // Update metadata index for Stronghold
+    // Persist full connection data to Stronghold
     let stronghold = state.stronghold.lock().map_err(|e| {
         error::AppError::StorageError(format!("Failed to lock stronghold storage: {}", e))
     })?;
-    stronghold.update_index_on_save(&connection)?;
+    stronghold.save_connection(&connection)?;
 
     Ok(connection)
 }
@@ -126,6 +126,14 @@ async fn get_schema(
     connection_id: String,
 ) -> AppResult<db::schema::Schema> {
     db::schema::get_schema(&state.connections, &connection_id, &app).await
+}
+
+#[tauri::command]
+async fn get_sql_keywords(
+    state: State<'_, AppState>,
+    connection_id: String,
+) -> AppResult<Vec<db::keywords::SqlKeyword>> {
+    db::keywords::fetch_keywords_from_pool(&state.connections, &connection_id).await
 }
 
 #[tauri::command]
@@ -147,6 +155,22 @@ async fn commit_data_changes(
     db::commit::commit_data_changes(&state.connections, request).await
 }
 
+#[tauri::command]
+async fn clear_data_only(
+    state: State<'_, AppState>,
+    connection_id: String,
+) -> AppResult<()> {
+    db::clear::clear_data_only(&state.connections, &connection_id).await
+}
+
+#[tauri::command]
+async fn clear_database(
+    state: State<'_, AppState>,
+    connection_id: String,
+) -> AppResult<()> {
+    db::clear::clear_database(&state.connections, &connection_id).await
+}
+
 // Import/Export Commands
 #[tauri::command]
 async fn export_tables(
@@ -158,12 +182,22 @@ async fn export_tables(
 }
 
 #[tauri::command]
+async fn cancel_export(connection_id: String) -> AppResult<()> {
+    import_export::export::cancel_export(connection_id).await
+}
+
+#[tauri::command]
 async fn import_tables(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     options: import_export::import::ImportOptions,
 ) -> AppResult<()> {
     import_export::import::import_tables(app, &state.connections, options).await
+}
+
+#[tauri::command]
+async fn cancel_import(connection_id: String) -> AppResult<()> {
+    import_export::import::cancel_import(connection_id).await
 }
 
 // AI Agent Commands
@@ -314,6 +348,20 @@ pub fn run() {
 
             let connection_manager = Arc::new(ConnectionManager::new());
 
+            // Load persisted connections from stronghold
+            match stronghold.load_all_connections() {
+                Ok(connections) => {
+                    for conn in connections {
+                        if let Err(e) = connection_manager.save_connection(conn) {
+                            eprintln!("Failed to restore connection: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to load connections from storage: {}", e);
+                }
+            }
+
             // Store in app state
             app.manage(AppState {
                 storage: Mutex::new(storage),
@@ -332,10 +380,15 @@ pub fn run() {
             delete_connection,
             update_connection,
             get_schema,
+            get_sql_keywords,
             run_query,
             commit_data_changes,
+            clear_data_only,
+            clear_database,
             export_tables,
+            cancel_export,
             import_tables,
+            cancel_import,
             stream_ai_chat,
             get_conversation_history,
             clear_conversation,

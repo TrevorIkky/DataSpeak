@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import * as dialog from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -12,16 +12,17 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ErrorHandler } from "@/lib/ErrorHandler";
 import { ExportOptions, ExportProgress } from "@/types/export.types";
 import { Table } from "@/types/database.types";
-import { Database, FileArchive, FolderOpen } from "lucide-react";
+import { Database, FileArchive, FolderOpen, StopCircle } from "lucide-react";
 
 interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   connectionId: string;
   tables: Table[];
+  databaseName?: string;
 }
 
-export function ExportDialog({ open, onOpenChange, connectionId, tables }: ExportDialogProps) {
+export function ExportDialog({ open, onOpenChange, connectionId, tables, databaseName }: ExportDialogProps) {
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
   const [outputDir, setOutputDir] = useState<string>("");
   const [createZip, setCreateZip] = useState<boolean>(true);
@@ -34,6 +35,11 @@ export function ExportDialog({ open, onOpenChange, connectionId, tables }: Expor
       setSelectedTables(new Set(tables.map((t) => t.name)));
     }
   }, [tables]);
+
+  // Clear output path when ZIP option changes
+  useEffect(() => {
+    setOutputDir("");
+  }, [createZip]);
 
   // Listen for progress events
   useEffect(() => {
@@ -68,17 +74,41 @@ export function ExportDialog({ open, onOpenChange, connectionId, tables }: Expor
 
   const handleBrowse = async () => {
     try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: "Select Output Directory",
-      });
+      if (createZip) {
+        // Generate default filename with database name and epoch timestamp
+        const timestamp = Math.floor(Date.now() / 1000);
+        const dbName = databaseName || 'export';
+        const defaultFilename = `${dbName}_${timestamp}.zip`;
 
-      if (selected) {
-        setOutputDir(selected as string);
+        // For ZIP: let user select file location
+        const selected = await dialog.save({
+          title: "Save ZIP Archive",
+          defaultPath: defaultFilename,
+          filters: [
+            {
+              name: "ZIP Archive",
+              extensions: ["zip"],
+            },
+          ],
+        });
+
+        if (selected && typeof selected === "string") {
+          setOutputDir(selected);
+        }
+      } else {
+        // For CSV: let user select directory
+        const selected = await dialog.open({
+          directory: true,
+          multiple: false,
+          title: "Select Output Directory",
+        });
+
+        if (selected && typeof selected === "string") {
+          setOutputDir(selected);
+        }
       }
     } catch (error) {
-      ErrorHandler.handle(error, "Failed to select directory");
+      ErrorHandler.handle(error, "Failed to select location");
     }
   };
 
@@ -109,10 +139,29 @@ export function ExportDialog({ open, onOpenChange, connectionId, tables }: Expor
       ErrorHandler.success("Export completed!", `Saved to: ${resultPath}`);
       onOpenChange(false);
     } catch (error) {
-      ErrorHandler.handle(error, "Export failed");
+      // Check if it was cancelled
+      if (progress?.cancelled) {
+        ErrorHandler.warning("Export cancelled");
+      } else {
+        ErrorHandler.handle(error, "Export failed");
+      }
     } finally {
       setIsExporting(false);
       setProgress(null);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!isExporting) {
+      onOpenChange(false);
+      return;
+    }
+
+    try {
+      await invoke("cancel_export", { connectionId });
+      ErrorHandler.success("Cancelling export...");
+    } catch (error) {
+      ErrorHandler.handle(error, "Failed to cancel export");
     }
   };
 
@@ -175,15 +224,17 @@ export function ExportDialog({ open, onOpenChange, connectionId, tables }: Expor
             </ScrollArea>
           </div>
 
-          {/* Output Directory */}
+          {/* Output Location */}
           <div className="space-y-2">
-            <Label htmlFor="output-dir">Output Directory</Label>
+            <Label htmlFor="output-dir">
+              {createZip ? "Output File" : "Output Directory"}
+            </Label>
             <div className="flex gap-2">
               <Input
                 id="output-dir"
                 value={outputDir}
                 onChange={(e) => setOutputDir(e.target.value)}
-                placeholder="Select output directory..."
+                placeholder={createZip ? "Select ZIP file location..." : "Select output directory..."}
                 disabled={isExporting}
                 className="flex-1"
               />
@@ -222,7 +273,18 @@ export function ExportDialog({ open, onOpenChange, connectionId, tables }: Expor
                 <span className="text-muted-foreground">{progress.status}</span>
                 <span className="font-medium">{progressPercent}%</span>
               </div>
-              <Progress value={progressPercent} />
+              <div className="flex items-center gap-2">
+                <Progress value={progressPercent} className="flex-1" />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleCancel}
+                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                  title="Cancel export"
+                >
+                  <StopCircle className="h-5 w-5" />
+                </Button>
+              </div>
               {progress.table_name && (
                 <p className="text-sm text-muted-foreground">
                   Exporting: {progress.table_name}
@@ -235,8 +297,7 @@ export function ExportDialog({ open, onOpenChange, connectionId, tables }: Expor
         <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isExporting}
+            onClick={handleCancel}
           >
             Cancel
           </Button>

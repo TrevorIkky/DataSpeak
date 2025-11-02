@@ -111,8 +111,14 @@ export function ConnectionDialog() {
       let savedConnection: any;
 
       if (isEditMode && editingConnectionId) {
-        // Update existing connection
-        savedConnection = await updateConnection(editingConnectionId, data);
+        // Update existing connection - include the id in the connection object
+        const connection = {
+          id: editingConnectionId,
+          ...data,
+          created_at: editingConnection?.created_at || "",
+          updated_at: new Date().toISOString(),
+        };
+        savedConnection = await updateConnection(editingConnectionId, connection);
       } else {
         // Create new connection
         const connection = {

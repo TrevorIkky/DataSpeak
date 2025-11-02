@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   ChevronRight,
   ChevronDown,
@@ -14,8 +15,12 @@ import {
   Key,
   Shield,
   Zap,
-  ListTree
+  ListTree,
+  DatabaseZap,
+  Eraser,
+  RefreshCw
 } from "lucide-react";
+import { ErrorHandler } from "@/lib/ErrorHandler";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -310,13 +315,16 @@ function TableItem({ table, onTableClick }: TableItemProps) {
 interface ConnectionItemProps {
   connection: Connection;
   isActive: boolean;
+  isOpen?: boolean;
+  onToggle?: (isOpen: boolean) => void;
   onConnect: (connection: Connection) => void;
   onEdit: (connection: Connection) => void;
   onDelete: (connection: Connection) => void;
 }
 
-function ConnectionItem({ connection, isActive, onConnect, onEdit, onDelete }: ConnectionItemProps) {
-  const [isOpen, setIsOpen] = useState(false);
+function ConnectionItem({ connection, isActive, isOpen: controlledIsOpen, onToggle, onConnect, onEdit, onDelete }: ConnectionItemProps) {
+  const [clearDataDialogOpen, setClearDataDialogOpen] = useState(false);
+  const [clearDatabaseDialogOpen, setClearDatabaseDialogOpen] = useState(false);
   const { schema, isLoading: schemaLoading } = useSchemaStore();
   const { addTableTab } = useQueryStore();
   const { activeConnection } = useConnectionStore();
@@ -327,15 +335,66 @@ function ConnectionItem({ connection, isActive, onConnect, onEdit, onDelete }: C
     setImportDialogOpen,
   } = useUIStore();
 
-  // Auto-expand when connection becomes active
-  useEffect(() => {
-    if (isActive) {
-      setIsOpen(true);
+  const isOpen = controlledIsOpen ?? false;
+
+  const handleOpenChange = (newOpen: boolean) => {
+    if (onToggle) {
+      onToggle(newOpen);
     }
-  }, [isActive]);
+  };
 
   const handleTableClick = (table: Table) => {
     addTableTab(table.name);
+  };
+
+  const handleClearData = async () => {
+    if (!activeConnection) return;
+
+    try {
+      const { loadSchema } = useSchemaStore.getState();
+
+      await invoke("clear_data_only", {
+        connectionId: activeConnection.id,
+      });
+
+      await loadSchema(activeConnection.id);
+      ErrorHandler.success("Data cleared", "All data has been cleared from all tables");
+    } catch (error) {
+      ErrorHandler.handle(error, "Failed to clear data");
+    } finally {
+      setClearDataDialogOpen(false);
+    }
+  };
+
+  const handleClearDatabase = async () => {
+    if (!activeConnection) return;
+
+    try {
+      const { loadSchema } = useSchemaStore.getState();
+
+      await invoke("clear_database", {
+        connectionId: activeConnection.id,
+      });
+
+      await loadSchema(activeConnection.id);
+      ErrorHandler.success("Database cleared", "All tables have been removed from the database");
+    } catch (error) {
+      ErrorHandler.handle(error, "Failed to clear database");
+    } finally {
+      setClearDatabaseDialogOpen(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (!activeConnection) return;
+
+    try {
+      const { loadSchema } = useSchemaStore.getState();
+      await loadSchema(activeConnection.id);
+      ErrorHandler.success("Schema refreshed", "Database schema has been reloaded");
+    } catch (error) {
+      ErrorHandler.handle(error, "Failed to refresh schema");
+    }
   };
 
   const showSchema = isActive && activeConnection?.id === connection.id;
@@ -344,7 +403,7 @@ function ConnectionItem({ connection, isActive, onConnect, onEdit, onDelete }: C
     <>
       <ContextMenu>
         <ContextMenuTrigger>
-          <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+          <Collapsible open={isOpen} onOpenChange={handleOpenChange}>
             <div
               className={`rounded-lg mb-2 transition-all ${isActive ? "bg-primary/5" : ""
                 }`}
@@ -365,18 +424,7 @@ function ConnectionItem({ connection, isActive, onConnect, onEdit, onDelete }: C
               </CollapsibleTrigger>
 
               <CollapsibleContent className="overflow-hidden">
-                {!isActive ? (
-                  <div className="px-3 pb-3 pt-1">
-                    <Button
-                      size="sm"
-                      className="w-full"
-                      onClick={() => onConnect(connection)}
-                    >
-                      <Link2 className="h-3.5 w-3.5 mr-1.5" />
-                      Connect
-                    </Button>
-                  </div>
-                ) : showSchema ? (
+                {showSchema ? (
                   <div className="px-2 pb-2">
                     {/* Tables List */}
                     {schemaLoading && (!schema || schema.tables.length === 0) ? (
@@ -431,6 +479,27 @@ function ConnectionItem({ connection, isActive, onConnect, onEdit, onDelete }: C
             <Upload className="h-4 w-4 mr-2" />
             Import Tables
           </ContextMenuItem>
+          {isActive && (
+            <ContextMenuItem onClick={handleRefresh}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh Schema
+            </ContextMenuItem>
+          )}
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            onClick={() => setClearDataDialogOpen(true)}
+            className="text-destructive focus:text-destructive focus:bg-destructive/10"
+          >
+            <Eraser className="h-4 w-4 mr-2" />
+            Clear All Data
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => setClearDatabaseDialogOpen(true)}
+            className="text-destructive focus:text-destructive focus:bg-destructive/10"
+          >
+            <DatabaseZap className="h-4 w-4 mr-2" />
+            Drop All Tables
+          </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
             onClick={() => onDelete(connection)}
@@ -450,12 +519,14 @@ function ConnectionItem({ connection, isActive, onConnect, onEdit, onDelete }: C
             onOpenChange={setExportDialogOpen}
             connectionId={activeConnection.id}
             tables={schema.tables}
+            databaseName={activeConnection.default_database || activeConnection.name}
           />
 
           <ImportDialog
             open={importDialogOpen}
             onOpenChange={setImportDialogOpen}
             connectionId={activeConnection.id}
+            databaseName={activeConnection.default_database || activeConnection.name}
             tables={schema.tables}
             onImportComplete={() => {
               // Schema will be reloaded automatically
@@ -463,6 +534,52 @@ function ConnectionItem({ connection, isActive, onConnect, onEdit, onDelete }: C
           />
         </>
       )}
+
+      {/* Clear Data Confirmation Dialog */}
+      <AlertDialog open={clearDataDialogOpen} onOpenChange={setClearDataDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear All Data</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to clear all data from "{connection.default_database || connection.name}"?
+              This will delete all data from all tables but keep the table structures intact.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleClearData}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Clear All Data
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Drop All Tables Confirmation Dialog */}
+      <AlertDialog open={clearDatabaseDialogOpen} onOpenChange={setClearDatabaseDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Drop All Tables</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to drop all tables from "{connection.default_database || connection.name}"?
+              This will permanently remove all tables and their data from the database.
+              This action cannot be undone and will result in a completely empty database.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleClearDatabase}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Drop All Tables
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -476,7 +593,13 @@ export function DatabaseNavigator() {
     loadConnections,
   } = useConnectionStore();
   const { loadSchema } = useSchemaStore();
-  const { setConnectionDialogOpen, deleteConnectionDialogOpen, setDeleteConnectionDialogOpen } = useUIStore();
+  const {
+    setConnectionDialogOpen,
+    deleteConnectionDialogOpen,
+    setDeleteConnectionDialogOpen,
+    openConnectionId,
+    setOpenConnectionId,
+  } = useUIStore();
   const [connectionToDelete, setConnectionToDelete] = useState<Connection | null>(null);
 
   useEffect(() => {
@@ -486,6 +609,20 @@ export function DatabaseNavigator() {
   const handleConnect = async (connection: Connection) => {
     setActiveConnection(connection);
     await loadSchema(connection.id);
+  };
+
+  const handleConnectionToggle = async (connection: Connection, isOpen: boolean) => {
+    if (isOpen) {
+      // Close all other connections and open this one
+      setOpenConnectionId(connection.id);
+      // Auto-connect when opening
+      if (activeConnection?.id !== connection.id) {
+        setActiveConnection(connection);
+        await loadSchema(connection.id);
+      }
+    } else {
+      setOpenConnectionId(null);
+    }
   };
 
   const handleEdit = (connection: Connection) => {
@@ -533,6 +670,8 @@ export function DatabaseNavigator() {
                 key={connection.id}
                 connection={connection}
                 isActive={activeConnection?.id === connection.id}
+                isOpen={openConnectionId === connection.id}
+                onToggle={(isOpen) => handleConnectionToggle(connection, isOpen)}
                 onConnect={handleConnect}
                 onEdit={handleEdit}
                 onDelete={handleDeleteClick}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import * as dialog from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -9,15 +9,17 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ErrorHandler } from "@/lib/ErrorHandler";
 import { ImportOptions, ImportProgress } from "@/types/export.types";
 import { Table } from "@/types/database.types";
-import { Database, FileArchive, FileUp } from "lucide-react";
+import { AlertTriangle, Database, FileArchive, FileUp, StopCircle } from "lucide-react";
 
 interface ImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   connectionId: string;
+  databaseName: string;
   tables: Table[];
   onImportComplete?: () => void;
 }
@@ -26,6 +28,7 @@ export function ImportDialog({
   open,
   onOpenChange,
   connectionId,
+  databaseName,
   tables,
   onImportComplete,
 }: ImportDialogProps) {
@@ -64,7 +67,7 @@ export function ImportDialog({
 
   const handleBrowse = async () => {
     try {
-      const selected = await open({
+      const selected = await dialog.open({
         directory: false,
         multiple: false,
         title: "Select Import File",
@@ -76,16 +79,15 @@ export function ImportDialog({
         ],
       });
 
-      if (selected) {
-        const path = selected as string;
-        setSourcePath(path);
+      if (selected && typeof selected === "string") {
+        setSourcePath(selected);
 
-        const isZipFile = path.toLowerCase().endsWith(".zip");
+        const isZipFile = selected.toLowerCase().endsWith(".zip");
         setIsZip(isZipFile);
 
         // If CSV, extract filename
         if (!isZipFile) {
-          const fileName = path.split("/").pop()?.replace(".csv", "") || "";
+          const fileName = selected.split("/").pop()?.replace(".csv", "") || "";
           setDetectedFiles([fileName]);
         } else {
           // For ZIP, we'll need to extract to see files
@@ -121,10 +123,29 @@ export function ImportDialog({
       onImportComplete?.();
       onOpenChange(false);
     } catch (error) {
-      ErrorHandler.handle(error, "Import failed");
+      // Check if it was cancelled
+      if (progress?.cancelled) {
+        ErrorHandler.warning("Import cancelled");
+      } else {
+        ErrorHandler.handle(error, "Import failed");
+      }
     } finally {
       setIsImporting(false);
       setProgress(null);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!isImporting) {
+      onOpenChange(false);
+      return;
+    }
+
+    try {
+      await invoke("cancel_import", { connectionId });
+      ErrorHandler.success("Cancelling import...");
+    } catch (error) {
+      ErrorHandler.handle(error, "Failed to cancel import");
     }
   };
 
@@ -141,7 +162,7 @@ export function ImportDialog({
             Import Data
           </DialogTitle>
           <DialogDescription>
-            Import data from CSV files or ZIP archives into your database
+            Import data from CSV files or ZIP archives into <span className="font-semibold text-foreground">{databaseName}</span>
           </DialogDescription>
         </DialogHeader>
 
@@ -228,7 +249,18 @@ export function ImportDialog({
                 <span className="text-muted-foreground">{progress.status}</span>
                 <span className="font-medium">{progressPercent}%</span>
               </div>
-              <Progress value={progressPercent} />
+              <div className="flex items-center gap-2">
+                <Progress value={progressPercent} className="flex-1" />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleCancel}
+                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                  title="Cancel import"
+                >
+                  <StopCircle className="h-5 w-5" />
+                </Button>
+              </div>
               {progress.file_name && (
                 <p className="text-sm text-muted-foreground">
                   Importing: {progress.file_name}
@@ -239,20 +271,26 @@ export function ImportDialog({
 
           {/* Warning */}
           {sourcePath && (
-            <div className="bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-md p-3">
-              <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                <strong>Warning:</strong> This will insert data into the selected tables.
-                Make sure the CSV columns match the table structure.
-              </p>
-            </div>
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>Important Warning</AlertTitle>
+              <AlertDescription className="space-y-1">
+                <p>
+                  This will insert data into the selected tables. Make sure the CSV columns match the table structure.
+                </p>
+                <p className="font-semibold">
+                  Cancelling an import mid-operation may result in partial data and database corruption.
+                  It is recommended to let the import complete or restore from a backup if cancelled.
+                </p>
+              </AlertDescription>
+            </Alert>
           )}
         </div>
 
         <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isImporting}
+            onClick={handleCancel}
           >
             Cancel
           </Button>

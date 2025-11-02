@@ -233,12 +233,14 @@ export function ConnectionList() {
             onOpenChange={setExportDialogOpen}
             connectionId={dialogConnection.id}
             tables={schema.tables}
+            databaseName={dialogConnection.default_database || dialogConnection.name}
           />
 
           <ImportDialog
             open={importDialogOpen}
             onOpenChange={setImportDialogOpen}
             connectionId={dialogConnection.id}
+            databaseName={dialogConnection.default_database || dialogConnection.name}
             tables={schema.tables}
             onImportComplete={async () => {
               // Reload schema after import

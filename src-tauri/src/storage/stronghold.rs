@@ -88,6 +88,77 @@ impl StrongholdStorage {
         let index = self.load_connection_index()?;
         Ok(index.connections.into_iter().map(|c| c.id).collect())
     }
+
+    pub fn save_connection(&self, connection: &Connection) -> AppResult<()> {
+        // Save individual connection file
+        let connection_file = self.app_data_dir.join(format!("connection_{}.json", connection.id));
+        let json = serde_json::to_string_pretty(connection)
+            .map_err(|e| AppError::StorageError(format!("Failed to serialize connection: {}", e)))?;
+        fs::write(&connection_file, json)
+            .map_err(|e| AppError::StorageError(format!("Failed to write connection file: {}", e)))?;
+
+        // Update the index
+        self.update_index_on_save(connection)?;
+
+        Ok(())
+    }
+
+    pub fn load_connection(&self, id: &str) -> AppResult<Connection> {
+        let connection_file = self.app_data_dir.join(format!("connection_{}.json", id));
+
+        if !connection_file.exists() {
+            return Err(AppError::StorageError(format!("Connection file not found: {}", id)));
+        }
+
+        let json = fs::read_to_string(connection_file)
+            .map_err(|e| AppError::StorageError(format!("Failed to read connection file: {}", e)))?;
+        let connection: Connection = serde_json::from_str(&json)
+            .map_err(|e| AppError::StorageError(format!("Failed to parse connection file: {}", e)))?;
+
+        Ok(connection)
+    }
+
+    pub fn load_all_connections(&self) -> AppResult<Vec<Connection>> {
+        let mut index = self.load_connection_index()?;
+        let mut connections = Vec::new();
+        let mut missing_ids = Vec::new();
+
+        for metadata in &index.connections {
+            match self.load_connection(&metadata.id) {
+                Ok(connection) => connections.push(connection),
+                Err(e) => {
+                    eprintln!("Warning: Failed to load connection {}: {}", metadata.id, e);
+                    // Track IDs that failed to load so we can clean them up
+                    missing_ids.push(metadata.id.clone());
+                }
+            }
+        }
+
+        // Clean up index if any connections failed to load
+        if !missing_ids.is_empty() {
+            eprintln!("Cleaning up {} missing connection(s) from index", missing_ids.len());
+            index.connections.retain(|c| !missing_ids.contains(&c.id));
+            if let Err(e) = self.save_connection_index(&index) {
+                eprintln!("Warning: Failed to update connection index after cleanup: {}", e);
+            }
+        }
+
+        Ok(connections)
+    }
+
+    pub fn delete_connection(&self, id: &str) -> AppResult<()> {
+        // Delete the connection file
+        let connection_file = self.app_data_dir.join(format!("connection_{}.json", id));
+        if connection_file.exists() {
+            fs::remove_file(connection_file)
+                .map_err(|e| AppError::StorageError(format!("Failed to delete connection file: {}", e)))?;
+        }
+
+        // Update the index
+        self.update_index_on_delete(id)?;
+
+        Ok(())
+    }
 }
 
 // Stronghold commands that will be called from JavaScript

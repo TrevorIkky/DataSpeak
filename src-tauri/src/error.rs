@@ -42,6 +42,9 @@ pub enum AppError {
     #[error("Invalid configuration: {0}")]
     ConfigError(String),
 
+    #[error("Operation cancelled: {0}")]
+    OperationCancelled(String),
+
     #[error("{0}")]
     Other(String),
 }

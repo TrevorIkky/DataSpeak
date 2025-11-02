@@ -16,6 +16,7 @@ export const useUIStore = create<IUIStore>((set) => ({
   popoverOpen: false,
   selectedGeography: null,
   isMapFullscreen: false,
+  openConnectionId: null,
 
   toggleSidebar: () => {
     set((state) => ({ sidebarOpen: !state.sidebarOpen }));
@@ -67,5 +68,9 @@ export const useUIStore = create<IUIStore>((set) => ({
 
   setIsMapFullscreen: (fullscreen: boolean) => {
     set({ isMapFullscreen: fullscreen });
+  },
+
+  setOpenConnectionId: (connectionId: string | null) => {
+    set({ openConnectionId: connectionId });
   },
 }));

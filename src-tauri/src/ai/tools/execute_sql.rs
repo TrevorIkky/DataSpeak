@@ -41,26 +41,21 @@ pub async fn execute_sql_tool(
 
     let execution_time = start.elapsed().as_millis();
 
-    // Build observation message
+    // Build observation message - just metadata, not the actual data
+    // The data is sent to the UI separately, so the AI just needs to know the query succeeded
     let observation = if result.row_count == 0 {
-        "Query executed successfully but returned 0 rows.".to_string()
-    } else if result.row_count == 1 {
-        format!(
-            "Query executed successfully. Returned 1 row in {}ms. Columns: {}",
-            execution_time,
-            result.columns.join(", ")
-        )
+        "Query executed successfully but returned 0 rows. The query was valid but no data matched the criteria.".to_string()
     } else {
         format!(
-            "Query executed successfully. Returned {} rows in {}ms. Columns: {}",
-            result.row_count, execution_time,
-            result.columns.join(", ")
+            "Query executed successfully in {}ms. Returned {} row{}. The results are displayed in the table above.",
+            execution_time,
+            result.row_count,
+            if result.row_count == 1 { "" } else { "s" }
         )
     };
 
     Ok(ToolResult {
         observation,
         data: Some(result),
-        execution_time_ms: execution_time,
     })
 }

@@ -63,4 +63,10 @@ export type Schema = {
   tables: Table[];
 };
 
+export type SqlKeyword = {
+  word: string;
+  category: string;
+  description?: string;
+};
+
 export type ConnectionStatus = "connected" | "disconnected" | "connecting" | "error";

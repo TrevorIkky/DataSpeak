@@ -170,12 +170,14 @@ export function SchemaBrowser() {
         onOpenChange={setExportDialogOpen}
         connectionId={activeConnection.id}
         tables={schema.tables}
+        databaseName={activeConnection.default_database || activeConnection.name}
       />
 
       <ImportDialog
         open={importDialogOpen}
         onOpenChange={setImportDialogOpen}
         connectionId={activeConnection.id}
+        databaseName={activeConnection.default_database || activeConnection.name}
         tables={schema.tables}
         onImportComplete={() => {
           // Reload schema after import

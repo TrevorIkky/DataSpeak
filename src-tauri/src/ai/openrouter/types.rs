@@ -15,6 +15,8 @@ pub struct OpenRouterRequest {
     pub response_format: Option<ResponseFormat>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
 }
 
 /// Response format for structured outputs
@@ -99,38 +101,26 @@ impl From<&crate::ai::agent::Message> for OpenRouterMessage {
 /// Response from OpenRouter API (non-streaming)
 #[derive(Debug, Deserialize)]
 pub struct OpenRouterResponse {
-    pub id: String,
-    pub model: String,
     pub choices: Vec<Choice>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Choice {
     pub message: OpenRouterMessage,
-    pub finish_reason: Option<String>,
-}
-
-impl Choice {
-    pub fn has_tool_calls(&self) -> bool {
-        self.message.tool_calls.is_some()
-    }
 }
 
 /// Streaming chunk from OpenRouter
 #[derive(Debug, Deserialize)]
 pub struct StreamChunk {
-    pub id: String,
     pub choices: Vec<StreamChoice>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct StreamChoice {
     pub delta: Delta,
-    pub finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Delta {
-    pub role: Option<String>,
     pub content: Option<String>,
 }

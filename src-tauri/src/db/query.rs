@@ -3,11 +3,27 @@ use crate::error::AppResult;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::{Deserialize, Serialize};
 use sqlx::{Column, Row, TypeInfo, ValueRef};
+use std::collections::HashMap;
 use std::time::Instant;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForeignKeyMetadata {
+    pub referenced_table: String,
+    pub referenced_column: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColumnMetadata {
+    pub name: String,
+    pub data_type: String,
+    pub enum_values: Option<Vec<String>>,
+    pub foreign_key: Option<ForeignKeyMetadata>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryResult {
     pub columns: Vec<String>,
+    pub column_metadata: Vec<ColumnMetadata>,
     pub rows: Vec<serde_json::Map<String, serde_json::Value>>,
     pub row_count: usize,
     pub execution_time_ms: u128,
@@ -46,8 +62,69 @@ pub async fn execute_query(
 
     Ok(QueryResult {
         columns: result.0,
-        rows: result.1,
-        row_count: result.2,
+        column_metadata: result.1,
+        rows: result.2,
+        row_count: result.3,
+        execution_time_ms,
+    })
+}
+
+pub async fn execute_table_query(
+    manager: &ConnectionManager,
+    connection_id: &str,
+    table_name: &str,
+    filter_column: Option<String>,
+    filter_value: Option<serde_json::Value>,
+    limit: i32,
+    offset: i32,
+) -> AppResult<QueryResult> {
+    let conn = manager.get_connection(connection_id)?;
+    let start = Instant::now();
+
+    // Build the base query
+    let mut query = format!("SELECT * FROM {}", table_name);
+
+    // Add WHERE clause if filter is provided
+    if let (Some(column), Some(value)) = (filter_column, filter_value) {
+        let where_clause = match value {
+            serde_json::Value::Null => format!("{} IS NULL", column),
+            serde_json::Value::Bool(b) => format!("{} = {}", column, b),
+            serde_json::Value::Number(n) => format!("{} = {}", column, n),
+            serde_json::Value::String(s) => {
+                // Escape single quotes by doubling them (SQL standard)
+                let escaped = s.replace("'", "''");
+                format!("{} = '{}'", column, escaped)
+            }
+            _ => {
+                // For arrays and objects, convert to string and escape
+                let s = value.to_string();
+                let escaped = s.replace("'", "''");
+                format!("{} = '{}'", column, escaped)
+            }
+        };
+        query.push_str(&format!(" WHERE {}", where_clause));
+    }
+
+    // Add pagination
+    query.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
+
+    // Reuse existing query execution logic
+    let result = match conn.database_type {
+        DatabaseType::PostgreSQL => {
+            execute_postgres_query(manager, connection_id, &query).await?
+        }
+        DatabaseType::MariaDB | DatabaseType::MySQL => {
+            execute_mysql_query(manager, connection_id, &query).await?
+        }
+    };
+
+    let execution_time_ms = start.elapsed().as_millis();
+
+    Ok(QueryResult {
+        columns: result.0,
+        column_metadata: result.1,
+        rows: result.2,
+        row_count: result.3,
         execution_time_ms,
     })
 }
@@ -56,37 +133,63 @@ async fn execute_postgres_query(
     manager: &ConnectionManager,
     connection_id: &str,
     query: &str,
-) -> AppResult<(Vec<String>, Vec<serde_json::Map<String, serde_json::Value>>, usize)> {
+) -> AppResult<(Vec<String>, Vec<ColumnMetadata>, Vec<serde_json::Map<String, serde_json::Value>>, usize)> {
     let pool = manager.get_pool_postgres(connection_id).await?;
 
     let rows = sqlx::query(query).fetch_all(&pool).await?;
 
-    // Get column names from first row, or try to get column info even with no rows
-    let columns: Vec<String> = if !rows.is_empty() {
-        rows[0]
-            .columns()
-            .iter()
-            .map(|col| col.name().to_string())
-            .collect()
+    // Try to extract table name and get FK metadata
+    let fk_map = if let Some(table_name) = extract_table_name(query) {
+        // Default to 'public' schema
+        get_postgres_fk_metadata(&pool, &table_name, "public")
+            .await
+            .unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
+
+    // Get column names and metadata from first row, or try to get column info even with no rows
+    let (columns, column_metadata): (Vec<String>, Vec<ColumnMetadata>) = if !rows.is_empty() {
+        let cols: Vec<_> = rows[0].columns().iter().map(|col| {
+            let name = col.name().to_string();
+            let data_type = col.type_info().name().to_string();
+            let foreign_key = fk_map.get(&name).cloned();
+            (name.clone(), ColumnMetadata {
+                name,
+                data_type,
+                enum_values: None, // PostgreSQL enums would need schema query
+                foreign_key,
+            })
+        }).collect();
+        (cols.iter().map(|(name, _)| name.clone()).collect(),
+         cols.into_iter().map(|(_, meta)| meta).collect())
     } else {
         // No rows, try to prepare the query to get column metadata
-        // Use fetch_optional which will give us row structure even if empty
         match sqlx::query(query).fetch_optional(&pool).await {
             Ok(Some(row)) => {
-                row.columns()
-                    .iter()
-                    .map(|col| col.name().to_string())
-                    .collect()
+                let cols: Vec<_> = row.columns().iter().map(|col| {
+                    let name = col.name().to_string();
+                    let data_type = col.type_info().name().to_string();
+                    let foreign_key = fk_map.get(&name).cloned();
+                    (name.clone(), ColumnMetadata {
+                        name,
+                        data_type,
+                        enum_values: None,
+                        foreign_key,
+                    })
+                }).collect();
+                (cols.iter().map(|(name, _)| name.clone()).collect(),
+                 cols.into_iter().map(|(_, meta)| meta).collect())
             }
             _ => {
                 // Can't get column info
-                vec![]
+                (vec![], vec![])
             }
         }
     };
 
     if rows.is_empty() {
-        return Ok((columns, vec![], 0));
+        return Ok((columns, column_metadata, vec![], 0));
     }
 
     // Convert rows to JSON
@@ -237,44 +340,188 @@ async fn execute_postgres_query(
         result_rows.push(row_map);
     }
 
-    Ok((columns, result_rows, rows.len()))
+    Ok((columns, column_metadata, result_rows, rows.len()))
+}
+
+// Helper function to get foreign key metadata for PostgreSQL
+async fn get_postgres_fk_metadata(
+    pool: &sqlx::PgPool,
+    table_name: &str,
+    schema_name: &str,
+) -> AppResult<HashMap<String, ForeignKeyMetadata>> {
+    let fk_query = r#"
+        SELECT
+            kcu.column_name,
+            ccu.table_name AS referenced_table,
+            ccu.column_name AS referenced_column
+        FROM information_schema.table_constraints AS tc
+        JOIN information_schema.key_column_usage AS kcu
+          ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage AS ccu
+          ON ccu.constraint_name = tc.constraint_name
+          AND ccu.table_schema = tc.table_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_name = $1
+          AND tc.table_schema = $2
+    "#;
+
+    let rows = sqlx::query(fk_query)
+        .bind(table_name)
+        .bind(schema_name)
+        .fetch_all(pool)
+        .await?;
+
+    let mut fk_map = HashMap::new();
+    for row in rows {
+        let column_name: String = row.try_get("column_name")?;
+        let referenced_table: String = row.try_get("referenced_table")?;
+        let referenced_column: String = row.try_get("referenced_column")?;
+
+        fk_map.insert(
+            column_name,
+            ForeignKeyMetadata {
+                referenced_table,
+                referenced_column,
+            },
+        );
+    }
+
+    Ok(fk_map)
+}
+
+// Helper function to get foreign key metadata for MySQL
+async fn get_mysql_fk_metadata(
+    pool: &sqlx::MySqlPool,
+    table_name: &str,
+    database_name: &str,
+) -> AppResult<HashMap<String, ForeignKeyMetadata>> {
+    let fk_query = r#"
+        SELECT
+            COLUMN_NAME as column_name,
+            REFERENCED_TABLE_NAME as referenced_table,
+            REFERENCED_COLUMN_NAME as referenced_column
+        FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = ?
+          AND TABLE_NAME = ?
+          AND REFERENCED_TABLE_NAME IS NOT NULL
+    "#;
+
+    let rows = sqlx::query(fk_query)
+        .bind(database_name)
+        .bind(table_name)
+        .fetch_all(pool)
+        .await?;
+
+    let mut fk_map = HashMap::new();
+    for row in rows {
+        let column_name: String = row.try_get("column_name")?;
+        let referenced_table: String = row.try_get("referenced_table")?;
+        let referenced_column: String = row.try_get("referenced_column")?;
+
+        fk_map.insert(
+            column_name,
+            ForeignKeyMetadata {
+                referenced_table,
+                referenced_column,
+            },
+        );
+    }
+
+    Ok(fk_map)
+}
+
+// Helper to extract table name from simple SELECT queries
+fn extract_table_name(query: &str) -> Option<String> {
+    let query_upper = query.to_uppercase();
+
+    // Simple pattern: SELECT ... FROM table_name
+    if let Some(from_idx) = query_upper.find("FROM") {
+        let after_from = &query[from_idx + 4..].trim();
+        // Get the first word after FROM (table name)
+        let table_name = after_from
+            .split_whitespace()
+            .next()?
+            .trim_matches(|c| c == '`' || c == '"' || c == '\'' || c == ';')
+            .to_string();
+
+        // Don't include schema prefix, just table name
+        if let Some(dot_idx) = table_name.rfind('.') {
+            return Some(table_name[dot_idx + 1..].to_string());
+        }
+
+        return Some(table_name);
+    }
+
+    None
 }
 
 async fn execute_mysql_query(
     manager: &ConnectionManager,
     connection_id: &str,
     query: &str,
-) -> AppResult<(Vec<String>, Vec<serde_json::Map<String, serde_json::Value>>, usize)> {
+) -> AppResult<(Vec<String>, Vec<ColumnMetadata>, Vec<serde_json::Map<String, serde_json::Value>>, usize)> {
     let pool = manager.get_pool_mysql(connection_id).await?;
 
     let rows = sqlx::query(query).fetch_all(&pool).await?;
 
-    // Get column names from first row, or try to get column info even with no rows
-    let columns: Vec<String> = if !rows.is_empty() {
-        rows[0]
-            .columns()
-            .iter()
-            .map(|col| col.name().to_string())
-            .collect()
+    // Get current database name for FK queries
+    let database_name: (String,) = sqlx::query_as("SELECT DATABASE()")
+        .fetch_one(&pool)
+        .await?;
+    let database_name = database_name.0;
+
+    // Try to extract table name and get FK metadata
+    let fk_map = if let Some(table_name) = extract_table_name(query) {
+        get_mysql_fk_metadata(&pool, &table_name, &database_name)
+            .await
+            .unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
+
+    // Get column names and metadata from first row, or try to get column info even with no rows
+    let (columns, column_metadata): (Vec<String>, Vec<ColumnMetadata>) = if !rows.is_empty() {
+        let cols: Vec<_> = rows[0].columns().iter().map(|col| {
+            let name = col.name().to_string();
+            let data_type = col.type_info().name().to_string();
+            let foreign_key = fk_map.get(&name).cloned();
+            (name.clone(), ColumnMetadata {
+                name,
+                data_type,
+                enum_values: None, // MySQL enums would need SHOW COLUMNS query
+                foreign_key,
+            })
+        }).collect();
+        (cols.iter().map(|(name, _)| name.clone()).collect(),
+         cols.into_iter().map(|(_, meta)| meta).collect())
     } else {
         // No rows, try to prepare the query to get column metadata
-        // Use fetch_optional which will give us row structure even if empty
         match sqlx::query(query).fetch_optional(&pool).await {
             Ok(Some(row)) => {
-                row.columns()
-                    .iter()
-                    .map(|col| col.name().to_string())
-                    .collect()
+                let cols: Vec<_> = row.columns().iter().map(|col| {
+                    let name = col.name().to_string();
+                    let data_type = col.type_info().name().to_string();
+                    let foreign_key = fk_map.get(&name).cloned();
+                    (name.clone(), ColumnMetadata {
+                        name,
+                        data_type,
+                        enum_values: None,
+                        foreign_key,
+                    })
+                }).collect();
+                (cols.iter().map(|(name, _)| name.clone()).collect(),
+                 cols.into_iter().map(|(_, meta)| meta).collect())
             }
             _ => {
                 // Can't get column info
-                vec![]
+                (vec![], vec![])
             }
         }
     };
 
     if rows.is_empty() {
-        return Ok((columns, vec![], 0));
+        return Ok((columns, column_metadata, vec![], 0));
     }
 
     // Convert rows to JSON
@@ -450,5 +697,5 @@ async fn execute_mysql_query(
         result_rows.push(row_map);
     }
 
-    Ok((columns, result_rows, rows.len()))
+    Ok((columns, column_metadata, result_rows, rows.len()))
 }

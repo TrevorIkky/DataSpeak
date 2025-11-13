@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, KeyboardEvent } from "react";
+import { useState, useRef, useEffect, KeyboardEvent, forwardRef, useImperativeHandle } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import getCaretCoordinates from "textarea-caret";
 import {
@@ -19,9 +19,12 @@ interface SqlAutocompleteTextareaProps {
   schema: Schema | null;
   keywords: SqlKeyword[];
   onFirstKeystroke?: () => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  onSelect?: (e: React.SyntheticEvent<HTMLTextAreaElement>) => void;
+  onClick?: (e: React.MouseEvent<HTMLTextAreaElement>) => void;
 }
 
-export function SqlAutocompleteTextarea({
+export const SqlAutocompleteTextarea = forwardRef<HTMLTextAreaElement, SqlAutocompleteTextareaProps>(({
   value,
   onChange,
   placeholder,
@@ -30,7 +33,10 @@ export function SqlAutocompleteTextarea({
   schema,
   keywords,
   onFirstKeystroke,
-}: SqlAutocompleteTextareaProps) {
+  onKeyDown: externalOnKeyDown,
+  onSelect: externalOnSelect,
+  onClick: externalOnClick,
+}, ref) => {
   const [isOpen, setIsOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -42,6 +48,9 @@ export function SqlAutocompleteTextarea({
   const highlightRef = useRef<HTMLDivElement>(null);
   const hasTypedRef = useRef(false);
   const lastInsertedPositionRef = useRef<number | null>(null);
+
+  // Expose the internal ref to the parent component
+  useImperativeHandle(ref, () => textareaRef.current as HTMLTextAreaElement);
 
   // Update highlighted HTML when value, keywords, or schema changes
   useEffect(() => {
@@ -167,6 +176,8 @@ export function SqlAutocompleteTextarea({
           setIsOpen(true);
         }
       }
+      // Call external handler if provided
+      externalOnKeyDown?.(e);
       return;
     }
 
@@ -197,10 +208,20 @@ export function SqlAutocompleteTextarea({
     }
   };
 
-  const handleClick = () => {
+  const handleClick = (e: React.MouseEvent<HTMLTextAreaElement>) => {
     if (textareaRef.current) {
       setCursorPosition(textareaRef.current.selectionStart);
     }
+    // Call external handler if provided
+    externalOnClick?.(e);
+  };
+
+  const handleSelect = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    if (textareaRef.current) {
+      setCursorPosition(textareaRef.current.selectionStart);
+    }
+    // Call external handler if provided
+    externalOnSelect?.(e);
   };
 
   const insertSelectedSuggestion = (suggestion: Suggestion) => {
@@ -268,6 +289,7 @@ export function SqlAutocompleteTextarea({
         onChange={handleTextareaChange}
         onKeyDown={handleKeyDown}
         onClick={handleClick}
+        onSelect={handleSelect}
         onScroll={handleScroll}
         onBlur={() => {
           // Delay closing to allow click on suggestion
@@ -327,4 +349,6 @@ export function SqlAutocompleteTextarea({
       )}
     </div>
   );
-}
+});
+
+SqlAutocompleteTextarea.displayName = 'SqlAutocompleteTextarea';

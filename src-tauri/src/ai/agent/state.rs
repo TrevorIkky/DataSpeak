@@ -89,7 +89,10 @@ pub struct ToolResult {
 /// Available tools for the agent
 #[derive(Debug, Clone)]
 pub enum Tool {
-    ExecuteSql { query: String },
+    ExecuteSql {
+        query: String,
+        dry_run: bool,
+    },
 }
 
 /// Final response from the agent

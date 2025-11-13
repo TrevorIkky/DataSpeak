@@ -109,33 +109,50 @@ pub async fn run_react_agent(
     while iterations < max_iterations {
         iterations += 1;
 
-        // Call LLM with tools
-        let response = client
-            .chat_with_tools(&settings.text_to_sql_model, &messages, tool_defs.clone(), Some(0.1))
+        // Call LLM with tools (streaming)
+        use crate::ai::openrouter::types::StreamEvent;
+        use futures::StreamExt;
+
+        let mut stream = client
+            .chat_with_tools_stream(&settings.text_to_sql_model, &messages, tool_defs.clone(), Some(0.1))
             .await?;
 
-        let choice = response.choices.first()
-            .ok_or_else(|| AppError::AgentError("No response from model".into()))?;
+        let mut thinking_content = String::new();
+        let mut received_tool_calls: Option<Vec<crate::ai::openrouter::types::ToolCall>> = None;
 
-        // Check if model wants to call tools
-        if let Some(tool_calls) = &choice.message.tool_calls {
-            // Emit thinking content if present (model's reasoning before tool call)
-            if let Some(thinking) = &choice.message.content {
-                if !thinking.is_empty() {
+        // Process stream events
+        while let Some(event_result) = stream.next().await {
+            let event = event_result?;
+
+            match event {
+                StreamEvent::Content(content) => {
+                    // Accumulate and emit thinking content
+                    thinking_content.push_str(&content);
                     app.emit(
                         "ai_token",
                         serde_json::json!({
                             "session_id": session_id,
-                            "content": thinking,
+                            "content": content,
                         }),
                     )?;
                 }
+                StreamEvent::ToolCalls(tool_calls) => {
+                    // Received complete tool calls
+                    received_tool_calls = Some(tool_calls);
+                    break;
+                }
+                StreamEvent::Done => {
+                    break;
+                }
             }
+        }
 
+        // Check if model wants to call tools
+        if let Some(tool_calls) = received_tool_calls {
             // Add assistant message with tool calls (must be before tool results)
             messages.push(Message {
                 role: MessageRole::Assistant,
-                content: choice.message.content.clone().unwrap_or_default(),
+                content: thinking_content,
                 timestamp: chrono::Utc::now(),
                 tool_call_id: None,
                 tool_calls: Some(tool_calls.clone()),
@@ -154,20 +171,31 @@ pub async fn run_react_agent(
                 let query = args["query"].as_str()
                     .ok_or_else(|| AppError::AgentError("Missing query in tool call".into()))?;
 
+                let dry_run = args["dry_run"].as_bool().unwrap_or(false);
+
                 sql_queries.push(query.to_string());
 
                 // Emit execution marker
+                let marker_text = if dry_run {
+                    format!("\n\n**Generated SQL:**\n```sql\n{}\n```\n", query)
+                } else {
+                    format!("\n\n**Executing SQL:**\n```sql\n{}\n```\n", query)
+                };
+
                 app.emit(
                     "ai_token",
                     serde_json::json!({
                         "session_id": session_id,
-                        "content": format!("\n\n**Executing SQL:**\n```sql\n{}\n```\n", query),
+                        "content": marker_text,
                     }),
                 )?;
 
-                // Execute SQL
+                // Execute SQL (or just validate if dry_run)
                 let tool_result = match tools::execute_sql_tool(
-                    &crate::ai::agent::Tool::ExecuteSql { query: query.to_string() },
+                    &crate::ai::agent::Tool::ExecuteSql {
+                        query: query.to_string(),
+                        dry_run,
+                    },
                     &connection_id,
                     connections,
                 ).await {
@@ -246,26 +274,20 @@ pub async fn run_react_agent(
                 // Add tool result
                 messages.push(Message::tool(tool_result.observation.clone(), tool_call.id.clone()));
             }
-        } else if let Some(content) = &choice.message.content {
-            // Model returned final answer (no tool calls)
-            // Emit final answer
-            app.emit(
-                "ai_token",
-                serde_json::json!({
-                    "session_id": session_id,
-                    "content": content,
-                }),
-            )?;
-
-            emit_complete(app, &session_id, content).await?;
-
-            return Ok(AgentResponse {
-                answer: content.clone(),
-                sql_queries,
-                iterations,
-            });
         } else {
-            return Err(AppError::AgentError("Model returned empty response".into()));
+            // Model returned final answer (no tool calls)
+            // Content was already emitted during streaming
+            if !thinking_content.is_empty() {
+                emit_complete(app, &session_id, &thinking_content).await?;
+
+                return Ok(AgentResponse {
+                    answer: thinking_content,
+                    sql_queries,
+                    iterations,
+                });
+            } else {
+                return Err(AppError::AgentError("Model returned empty response".into()));
+            }
         }
     }
 

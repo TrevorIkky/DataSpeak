@@ -118,9 +118,46 @@ pub struct StreamChunk {
 #[derive(Debug, Deserialize)]
 pub struct StreamChoice {
     pub delta: Delta,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Delta {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<DeltaToolCall>>,
+}
+
+/// Tool call delta in streaming response
+#[derive(Debug, Deserialize, Clone)]
+pub struct DeltaToolCall {
+    pub index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "type")]
+    pub call_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function: Option<DeltaFunctionCall>,
+}
+
+/// Function call delta in streaming response
+#[derive(Debug, Deserialize, Clone)]
+pub struct DeltaFunctionCall {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<String>,
+}
+
+/// Stream event for tool calling streams
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    /// Content token
+    Content(String),
+    /// Complete tool calls (when finish_reason is "tool_calls")
+    ToolCalls(Vec<ToolCall>),
+    /// Stream finished
+    Done,
 }

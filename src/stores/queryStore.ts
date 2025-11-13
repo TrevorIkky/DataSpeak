@@ -26,10 +26,14 @@ export const useQueryStore = create<IQueryStore>((set, get) => ({
     set({ tabs, activeTabId: id });
   },
 
-  addTableTab: (tableName: string) => {
-    // Check if table tab already exists
+  addTableTab: (tableName: string, filter?: { columnName: string; value: any }) => {
+    // Check if table tab already exists with same filter
     const existingTab = get().tabs.find(
-      (tab) => tab.type === 'table' && (tab as TableTab).tableName === tableName
+      (tab) => tab.type === 'table' &&
+      (tab as TableTab).tableName === tableName &&
+      (!filter ||
+        ((tab as TableTab).filter?.columnName === filter.columnName &&
+         (tab as TableTab).filter?.value === filter.value))
     );
 
     if (existingTab) {
@@ -39,10 +43,14 @@ export const useQueryStore = create<IQueryStore>((set, get) => ({
     }
 
     const id = `table-${tableName}-${Date.now()}`;
+    const tabTitle = filter
+      ? `${tableName} (${filter.columnName}=${filter.value})`
+      : tableName;
+
     const newTab: TableTab = {
       id,
       type: 'table',
-      title: tableName,
+      title: tabTitle,
       tableName,
       isLoading: false,
       isActive: true,
@@ -51,6 +59,7 @@ export const useQueryStore = create<IQueryStore>((set, get) => ({
         pageSize: 50,
       },
       viewMode: 'data',
+      filter,
     };
 
     // Set all other tabs to inactive
@@ -116,6 +125,13 @@ export const useQueryStore = create<IQueryStore>((set, get) => ({
       isActive: tab.id === id,
     }));
     set({ tabs, activeTabId: id });
+  },
+
+  reorderTabs: (fromIndex: number, toIndex: number) => {
+    const tabs = [...get().tabs];
+    const [movedTab] = tabs.splice(fromIndex, 1);
+    tabs.splice(toIndex, 0, movedTab);
+    set({ tabs });
   },
 
   updateTabQuery: (id: string, query: string) => {
@@ -202,9 +218,11 @@ export const useQueryStore = create<IQueryStore>((set, get) => ({
       const { pageIndex, pageSize } = tableTab.pagination;
       const offset = pageIndex * pageSize;
 
-      const result = await invoke<QueryResult>("run_query", {
+      const result = await invoke<QueryResult>("run_table_query", {
         connectionId,
-        query: `SELECT * FROM ${tableTab.tableName}`,
+        tableName: tableTab.tableName,
+        filterColumn: tableTab.filter?.columnName || null,
+        filterValue: tableTab.filter?.value || null,
         limit: pageSize,
         offset,
       });

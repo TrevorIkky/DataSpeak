@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { QueryEditor } from "./QueryEditor";
 import { EditableDataGrid } from "./EditableDataGrid";
 import { TableDataTab } from "./TableDataTab";
@@ -14,19 +14,90 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  DragOverlay,
+  DragStartEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  horizontalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useQueryStore } from "@/stores/queryStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useSchemaStore } from "@/stores/schemaStore";
-import type { QueryTab, TableTab, VisualizationTab } from "@/types/query.types";
+import type { QueryTab, TableTab, VisualizationTab, Tab } from "@/types/query.types";
 import type { DataGridChanges } from "@/types/datagrid.types";
 import { extractTableFromQuery } from "@/lib/queryParser";
 import { commitDataChanges } from "@/api/datagrid";
 import { toast } from "sonner";
 
+// Sortable Tab Component
+interface SortableTabProps {
+  tab: Tab;
+  isActive: boolean;
+  onSelect: () => void;
+  onRemove: (e: React.MouseEvent) => void;
+}
+
+function SortableTab({ tab, isActive, onSelect, onRemove }: SortableTabProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: tab.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0 : 1,
+  };
+
+  return (
+    <button
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClick={onSelect}
+      className={`
+        flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors touch-none
+        ${
+          isActive
+            ? "bg-primary/10 text-primary border border-primary/20"
+            : "hover:bg-accent"
+        }
+        ${isDragging ? "cursor-grabbing" : "cursor-grab"}
+      `}
+    >
+      <span className="truncate max-w-[150px]" title={tab.title}>{tab.title}</span>
+      {tab.isLoading && (
+        <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+      )}
+      <button
+        onClick={onRemove}
+        className="hover:bg-destructive/20 rounded-sm p-0.5 transition-colors"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </button>
+  );
+}
+
 export function QueryWorkspace() {
   const { activeConnection } = useConnectionStore();
-  const { tabs, activeTabId, addTab, addChatTab, setActiveTab, removeTab, updateTab } = useQueryStore();
+  const { tabs, activeTabId, addTab, addChatTab, setActiveTab, removeTab, updateTab, reorderTabs } = useQueryStore();
   const { schema } = useSchemaStore();
   const {
     popoverOpen,
@@ -36,6 +107,18 @@ export function QueryWorkspace() {
     isMapFullscreen,
     setIsMapFullscreen,
   } = useUIStore();
+
+  // State for drag overlay
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  // Configure drag sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // 8px of movement required to start dragging
+      },
+    })
+  );
 
   // Create initial tab if none exists
   useEffect(() => {
@@ -353,40 +436,70 @@ export function QueryWorkspace() {
     );
   };
 
+  // Handle drag start event
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
+  // Handle drag end event
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      const oldIndex = tabs.findIndex((tab) => tab.id === active.id);
+      const newIndex = tabs.findIndex((tab) => tab.id === over.id);
+      reorderTabs(oldIndex, newIndex);
+    }
+
+    setActiveId(null);
+  };
+
+  // Get the active dragged tab
+  const draggedTab = activeId ? tabs.find((tab) => tab.id === activeId) : null;
+
   return (
     <div className="flex flex-col h-full">
       {/* Tabs Bar */}
       <div className="flex items-center border-b bg-card px-2 py-1 gap-1">
-        <div className="flex-1 flex items-center gap-1 overflow-x-auto">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`
-                flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors
-                ${
-                  tab.id === activeTabId
-                    ? "bg-primary/10 text-primary border border-primary/20"
-                    : "hover:bg-accent"
-                }
-              `}
-            >
-              <span className="truncate max-w-[150px]">{tab.title}</span>
-              {tab.isLoading && (
-                <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-              )}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeTab(tab.id);
-                }}
-                className="hover:bg-destructive/20 rounded-sm p-0.5 transition-colors"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </button>
-          ))}
-        </div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={tabs.map((tab) => tab.id)}
+            strategy={horizontalListSortingStrategy}
+          >
+            <div className="flex-1 flex items-center gap-1 overflow-x-auto">
+              {tabs.map((tab) => (
+                <SortableTab
+                  key={tab.id}
+                  tab={tab}
+                  isActive={tab.id === activeTabId}
+                  onSelect={() => setActiveTab(tab.id)}
+                  onRemove={(e) => {
+                    e.stopPropagation();
+                    removeTab(tab.id);
+                  }}
+                />
+              ))}
+            </div>
+          </SortableContext>
+          <DragOverlay>
+            {draggedTab ? (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm bg-primary/10 text-primary border border-primary/20 cursor-grabbing shadow-lg">
+                <span className="truncate max-w-[150px]" title={draggedTab.title}>{draggedTab.title}</span>
+                {draggedTab.isLoading && (
+                  <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                )}
+                <button className="hover:bg-destructive/20 rounded-sm p-0.5 transition-colors">
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
 
         {hasChatTab ? (
           <button

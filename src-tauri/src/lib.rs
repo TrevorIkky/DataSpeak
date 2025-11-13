@@ -169,6 +169,27 @@ async fn run_query(
 }
 
 #[tauri::command]
+async fn run_table_query(
+    state: State<'_, AppState>,
+    connection_id: String,
+    table_name: String,
+    filter_column: Option<String>,
+    filter_value: Option<serde_json::Value>,
+    limit: i32,
+    offset: i32,
+) -> AppResult<db::query::QueryResult> {
+    db::query::execute_table_query(
+        &state.connections,
+        &connection_id,
+        &table_name,
+        filter_column,
+        filter_value,
+        limit,
+        offset,
+    ).await
+}
+
+#[tauri::command]
 async fn get_query_history(connection_id: Option<String>) -> AppResult<Vec<storage::query_history::QueryHistoryEntry>> {
     storage::query_history::get_query_history(connection_id).await
 }
@@ -426,6 +447,7 @@ pub fn run() {
             get_sql_keywords,
             highlight_sql,
             run_query,
+            run_table_query,
             get_query_history,
             clear_query_history,
             delete_query_from_history,

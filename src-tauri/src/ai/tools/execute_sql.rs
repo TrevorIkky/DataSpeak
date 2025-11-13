@@ -11,7 +11,7 @@ pub async fn execute_sql_tool(
     connection_id: &str,
     connections: &ConnectionManager,
 ) -> AppResult<ToolResult> {
-    let Tool::ExecuteSql { query } = tool;
+    let Tool::ExecuteSql { query, dry_run } = tool;
 
     let start = Instant::now();
 
@@ -28,6 +28,19 @@ pub async fn execute_sql_tool(
 
     // Additional DB-specific validation
     sanitizer::validate_for_db_type(&sanitized_query, db_type)?;
+
+    // If dry_run, just return the validated SQL without executing
+    if *dry_run {
+        let observation = format!(
+            "SQL query generated and validated successfully:\n\n```sql\n{}\n```\n\nThis query is ready to be used.",
+            sanitized_query
+        );
+
+        return Ok(ToolResult {
+            observation,
+            data: None,
+        });
+    }
 
     // Execute with existing query infrastructure
     let result = query::execute_query(

@@ -17,6 +17,15 @@ export const useUIStore = create<IUIStore>((set) => ({
   selectedGeography: null,
   isMapFullscreen: false,
   openConnectionId: null,
+  executionMode: 'current',
+  // AI Query Generation
+  aiQueryWindowOpen: false,
+  aiQueryWindowPosition: { x: 0, y: 0 },
+  aiQueryOriginalQuery: "",
+  aiQueryGeneratedSql: "",
+  aiQueryThinkingContent: "",
+  aiQueryError: null,
+  isAiQueryGenerating: false,
 
   toggleSidebar: () => {
     set((state) => ({ sidebarOpen: !state.sidebarOpen }));
@@ -72,5 +81,59 @@ export const useUIStore = create<IUIStore>((set) => ({
 
   setOpenConnectionId: (connectionId: string | null) => {
     set({ openConnectionId: connectionId });
+  },
+
+  setExecutionMode: (mode: 'current' | 'all') => {
+    set({ executionMode: mode });
+  },
+
+  openAiQueryWindow: (position, originalQuery) => {
+    set({
+      aiQueryWindowOpen: true,
+      aiQueryWindowPosition: position,
+      aiQueryOriginalQuery: originalQuery,
+      aiQueryGeneratedSql: "",
+      aiQueryThinkingContent: "",
+      aiQueryError: null,
+      isAiQueryGenerating: false,
+    });
+  },
+
+  closeAiQueryWindow: () => {
+    set({
+      aiQueryWindowOpen: false,
+      aiQueryOriginalQuery: "",
+      aiQueryGeneratedSql: "",
+      aiQueryThinkingContent: "",
+      aiQueryError: null,
+      isAiQueryGenerating: false,
+    });
+  },
+
+  startAiQueryGeneration: () => {
+    set({ isAiQueryGenerating: true, aiQueryGeneratedSql: "", aiQueryThinkingContent: "", aiQueryError: null });
+  },
+
+  updateAiQueryThinkingContent: (thinkingContent) => {
+    set({ aiQueryThinkingContent: thinkingContent });
+  },
+
+  updateAiQuerySql: (generatedSql) => {
+    set({ aiQueryGeneratedSql: generatedSql });
+  },
+
+  completeAiQueryGeneration: (generatedSql, thinkingContent) => {
+    set({
+      isAiQueryGenerating: false,
+      aiQueryGeneratedSql: generatedSql,
+      aiQueryThinkingContent: thinkingContent,
+    });
+  },
+
+  setAiQueryError: (error) => {
+    set({
+      isAiQueryGenerating: false,
+      aiQueryError: error,
+    });
   },
 }));

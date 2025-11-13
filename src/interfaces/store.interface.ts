@@ -40,10 +40,11 @@ export interface IQueryStore {
   tabs: Tab[];
   activeTabId: string | null;
   addTab: (query?: string) => void;
-  addTableTab: (tableName: string) => void;
+  addTableTab: (tableName: string, filter?: { columnName: string; value: any }) => void;
   addChatTab: () => void;
   removeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
   updateTabQuery: (id: string, query: string) => void;
   updateTab: (id: string, updates: Partial<Tab>) => void;
   executeQuery: (id: string, connectionId: string) => Promise<void>;
@@ -66,6 +67,15 @@ export interface IUIStore {
   selectedGeography: GeographicCell | null;
   isMapFullscreen: boolean;
   openConnectionId: string | null;
+  executionMode: 'current' | 'all';
+  // AI Query Generation
+  aiQueryWindowOpen: boolean;
+  aiQueryWindowPosition: { x: number; y: number };
+  aiQueryOriginalQuery: string;
+  aiQueryGeneratedSql: string;
+  aiQueryThinkingContent: string;
+  aiQueryError: string | null;
+  isAiQueryGenerating: boolean;
   toggleSidebar: () => void;
   setSettingsDialogOpen: (open: boolean) => void;
   setConnectionDialogOpen: (open: boolean, editingConnectionId?: string | null) => void;
@@ -80,4 +90,12 @@ export interface IUIStore {
   setSelectedGeography: (geography: GeographicCell | null) => void;
   setIsMapFullscreen: (fullscreen: boolean) => void;
   setOpenConnectionId: (connectionId: string | null) => void;
+  setExecutionMode: (mode: 'current' | 'all') => void;
+  openAiQueryWindow: (position: { x: number; y: number }, originalQuery: string) => void;
+  closeAiQueryWindow: () => void;
+  startAiQueryGeneration: () => void;
+  updateAiQueryThinkingContent: (thinkingContent: string) => void;
+  updateAiQuerySql: (generatedSql: string) => void;
+  completeAiQueryGeneration: (generatedSql: string, thinkingContent: string) => void;
+  setAiQueryError: (error: string) => void;
 }

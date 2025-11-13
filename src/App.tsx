@@ -10,6 +10,7 @@ import { ConnectionDialog } from "@/components/connections/ConnectionDialog";
 import { DatabaseNavigator } from "@/components/navigator/DatabaseNavigator";
 import { QueryWorkspace } from "@/components/query/QueryWorkspace";
 import { ThemeProvider } from "@/components/theme-provider";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -42,7 +43,8 @@ function App() {
 
   return (
     <ThemeProvider defaultTheme="system" storageKey="dataspeak-theme">
-      <div className="flex h-screen w-screen flex-col bg-background">
+      <TooltipProvider>
+        <div className="flex h-screen w-screen flex-col bg-background">
         {/* Header */}
         <header className="flex items-center justify-between border-b px-4 py-3 bg-card">
           <div className="flex items-center gap-2 md:gap-3">
@@ -146,7 +148,8 @@ function App() {
 
         {/* Toast Notifications */}
         <Toaster />
-      </div>
+        </div>
+      </TooltipProvider>
     </ThemeProvider>
   );
 }

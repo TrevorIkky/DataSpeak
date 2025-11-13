@@ -1,5 +1,18 @@
+export type ForeignKeyMetadata = {
+  referenced_table: string;
+  referenced_column: string;
+};
+
+export type ColumnMetadata = {
+  name: string;
+  data_type: string;
+  enum_values?: string[] | null;
+  foreign_key?: ForeignKeyMetadata | null;
+};
+
 export type QueryResult = {
   columns: string[];
+  column_metadata: ColumnMetadata[];
   rows: Record<string, any>[];
   row_count: number;
   execution_time_ms: number;
@@ -42,6 +55,10 @@ export type TableTab = BaseTab & {
     pageSize: number;
   };
   viewMode: 'data' | 'properties' | 'erd';
+  filter?: {
+    columnName: string;
+    value: any;
+  };
 };
 
 export type VisualizationTab = BaseTab & {

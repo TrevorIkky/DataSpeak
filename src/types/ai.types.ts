@@ -12,7 +12,7 @@ export type AIModelConfig = {
   visualizationModel: string;
 };
 
-export type VisualizationType = "bar" | "line" | "pie" | "scatter" | "area" | "table";
+export type VisualizationType = "bar" | "line" | "pie" | "scatter" | "area" | "table" | "radar" | "radial";
 
 export type VisualizationConfig = {
   type: VisualizationType;

@@ -27,7 +27,7 @@ export function RadialChartRenderer({ data, dataKey, nameKey }: RadialChartRende
   }, {} as ChartConfig);
 
   // Transform data to include fill property
-  const chartData = data.map((item, index) => ({
+  const chartData: (Record<string, any> & { fill: string })[] = data.map((item, index) => ({
     ...item,
     fill: `var(--chart-${(index % 5) + 1})`,
   }));

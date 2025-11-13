@@ -6,8 +6,6 @@ import type {
 import type { AppSettings } from "@/types/settings.types";
 import type { ERDData } from "@/types/erd.types";
 import type {
-  ExportProgress,
-  ImportProgress,
   ExportResult,
   ImportResult
 } from "@/types/export.types";

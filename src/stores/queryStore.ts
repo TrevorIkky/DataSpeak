@@ -128,10 +128,10 @@ export const useQueryStore = create<IQueryStore>((set, get) => ({
     set({ tabs });
   },
 
-  updateTab: (id: string, updates: Partial<Tab>) => {
+  updateTab: (id: string, updates: Partial<Omit<Tab, 'type'>>) => {
     const tabs = get().tabs.map((tab) => {
       if (tab.id === id) {
-        return { ...tab, ...updates };
+        return { ...tab, ...updates } as Tab;
       }
       return tab;
     });

@@ -1,4 +1,5 @@
 pub mod stronghold;
+pub mod query_history;
 
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};

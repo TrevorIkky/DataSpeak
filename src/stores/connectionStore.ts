@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import type { Connection, ConnectionStatus } from "@/types/database.types";
+import type { Connection } from "@/types/database.types";
 import type { IConnectionStore } from "@/interfaces/store.interface";
 import { ErrorHandler } from "@/lib/ErrorHandler";
 

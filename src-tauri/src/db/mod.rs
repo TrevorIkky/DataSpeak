@@ -5,3 +5,4 @@ pub mod erd;
 pub mod commit;
 pub mod clear;
 pub mod keywords;
+pub mod syntax_highlight;

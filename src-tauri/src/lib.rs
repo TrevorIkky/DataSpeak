@@ -137,6 +137,14 @@ async fn get_sql_keywords(
 }
 
 #[tauri::command]
+async fn highlight_sql(
+    sql: String,
+    config: db::syntax_highlight::HighlightConfig,
+) -> AppResult<String> {
+    Ok(db::syntax_highlight::highlight_sql(&sql, &config))
+}
+
+#[tauri::command]
 async fn run_query(
     state: State<'_, AppState>,
     connection_id: String,
@@ -144,7 +152,35 @@ async fn run_query(
     limit: i32,
     offset: i32,
 ) -> AppResult<db::query::QueryResult> {
-    db::query::execute_query(&state.connections, &connection_id, &query, limit, offset).await
+    let start = std::time::Instant::now();
+    let result = db::query::execute_query(&state.connections, &connection_id, &query, limit, offset).await;
+    let execution_time_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    // Save to history
+    let success = result.is_ok();
+    let _ = storage::query_history::add_query_to_history(
+        query,
+        connection_id,
+        execution_time_ms,
+        success,
+    ).await;
+
+    result
+}
+
+#[tauri::command]
+async fn get_query_history(connection_id: Option<String>) -> AppResult<Vec<storage::query_history::QueryHistoryEntry>> {
+    storage::query_history::get_query_history(connection_id).await
+}
+
+#[tauri::command]
+async fn clear_query_history() -> AppResult<()> {
+    storage::query_history::clear_query_history().await
+}
+
+#[tauri::command]
+async fn delete_query_from_history(query_id: String) -> AppResult<()> {
+    storage::query_history::delete_query_from_history(query_id).await
 }
 
 #[tauri::command]
@@ -338,6 +374,13 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle();
 
+            // Initialize query history path
+            let app_data_dir = app_handle
+                .path()
+                .app_data_dir()
+                .expect("Failed to get app data dir");
+            storage::query_history::init_history_path(app_data_dir);
+
             // Initialize storage
             let storage = StorageManager::new(app_handle)
                 .expect("Failed to initialize storage");
@@ -381,7 +424,11 @@ pub fn run() {
             update_connection,
             get_schema,
             get_sql_keywords,
+            highlight_sql,
             run_query,
+            get_query_history,
+            clear_query_history,
+            delete_query_from_history,
             commit_data_changes,
             clear_data_only,
             clear_database,

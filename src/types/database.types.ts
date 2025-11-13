@@ -70,3 +70,10 @@ export type SqlKeyword = {
 };
 
 export type ConnectionStatus = "connected" | "disconnected" | "connecting" | "error";
+
+export type QueryResult = {
+  columns: string[];
+  rows: Record<string, any>[];
+  row_count: number;
+  execution_time_ms: number;
+};

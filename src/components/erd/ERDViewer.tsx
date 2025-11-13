@@ -10,7 +10,6 @@ import {
   BackgroundVariant,
   useNodesState,
   useEdgesState,
-  MarkerType,
   Handle,
   Position,
   BaseEdge,
@@ -35,7 +34,7 @@ interface ERDViewerProps {
 
 type RelationshipType = 'one-to-one' | 'one-to-many' | 'many-to-many';
 
-interface ERDEdgeData {
+interface ERDEdgeData extends Record<string, unknown> {
   columnName: string;
   relationshipType: RelationshipType;
   isRelatedToFocus: boolean;
@@ -255,7 +254,7 @@ function ERDViewerInner({ tables, focusTableName }: ERDViewerProps) {
     });
 
     // Helper function to determine relationship type
-    const determineRelationshipType = (sourceTable: TableType, fkColumn: Column, targetTableName: string): RelationshipType => {
+    const determineRelationshipType = (sourceTable: TableType, fkColumn: Column): RelationshipType => {
       // If FK column is also a PK, it's likely one-to-one
       if (fkColumn.is_primary_key) {
         return 'one-to-one';
@@ -284,7 +283,7 @@ function ERDViewerInner({ tables, focusTableName }: ERDViewerProps) {
 
           if (targetExists) {
             const isRelatedToFocus = table.name === focusTableName || col.foreign_key_table === focusTableName;
-            const relationshipType = determineRelationshipType(table, col, col.foreign_key_table);
+            const relationshipType = determineRelationshipType(table, col);
 
             const edge: Edge<ERDEdgeData> = {
               id: `e-${table.name}-${col.foreign_key_table}-${col.name}`,
@@ -346,7 +345,6 @@ function ERDViewerInner({ tables, focusTableName }: ERDViewerProps) {
           nodesDraggable={true}
           nodesConnectable={false}
           elementsSelectable={true}
-          edgesUpdatable={false}
           edgesFocusable={true}
           deleteKeyCode={null}
           proOptions={{ hideAttribution: true }}

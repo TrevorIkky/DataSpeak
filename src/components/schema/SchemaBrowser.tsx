@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronRight, ChevronDown, Table as TableIcon, Key, Link2, Loader2, Download, Upload } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +19,7 @@ interface TableItemProps {
   onSelectTable: (table: Table) => void;
 }
 
-function TableItem({ table, onSelectTable }: TableItemProps) {
+function TableItem({ table }: TableItemProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (

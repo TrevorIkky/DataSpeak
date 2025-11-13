@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Play, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SqlAutocompleteTextarea } from "./SqlAutocompleteTextarea";
+import { QueryHistoryDialog } from "./QueryHistoryDialog";
 import { useQueryStore } from "@/stores/queryStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSchemaStore } from "@/stores/schemaStore";
@@ -14,6 +15,11 @@ export function QueryEditor() {
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const queryTab = activeTab?.type === 'query' ? activeTab : null;
   const [query, setQuery] = useState(queryTab?.query || "");
+
+  // Sync local query state with active tab
+  useEffect(() => {
+    setQuery(queryTab?.query || "");
+  }, [activeTabId, queryTab?.query]);
 
   // Fetch keywords when user starts typing
   const handleFirstKeystroke = () => {
@@ -40,23 +46,26 @@ export function QueryEditor() {
     <div className="flex flex-col h-full border-b">
       <div className="flex items-center justify-between px-4 py-2 border-b bg-card">
         <h3 className="text-sm font-semibold">Query Editor</h3>
-        <Button
-          size="sm"
-          onClick={handleExecute}
-          disabled={!activeConnection || !query.trim() || isExecuting}
-        >
-          {isExecuting ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Executing...
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4 mr-2" />
-              Execute
-            </>
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          <QueryHistoryDialog onSelectQuery={handleQueryChange} />
+          <Button
+            size="sm"
+            onClick={handleExecute}
+            disabled={!activeConnection || !query.trim() || isExecuting}
+          >
+            {isExecuting ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Executing...
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4 mr-2" />
+                Execute
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 p-4">

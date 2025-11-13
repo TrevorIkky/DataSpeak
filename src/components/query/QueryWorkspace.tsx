@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/popover";
 import { useQueryStore } from "@/stores/queryStore";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useAiStore } from "@/stores/aiStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useSchemaStore } from "@/stores/schemaStore";
 import type { QueryTab, TableTab, VisualizationTab } from "@/types/query.types";
@@ -28,11 +27,8 @@ import { toast } from "sonner";
 export function QueryWorkspace() {
   const { activeConnection } = useConnectionStore();
   const { tabs, activeTabId, addTab, addChatTab, setActiveTab, removeTab, updateTab } = useQueryStore();
-  const { generateVisualization } = useAiStore();
   const { schema } = useSchemaStore();
   const {
-    isGeneratingVisualization,
-    setIsGeneratingVisualization,
     popoverOpen,
     setPopoverOpen,
     selectedGeography,
@@ -50,29 +46,6 @@ export function QueryWorkspace() {
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const hasChatTab = tabs.some((t) => t.type === 'chat');
-
-  // Handle visualization generation
-  const handleVisualize = async () => {
-    if (!activeTab || activeTab.type !== 'query') return;
-    const queryTab = activeTab as QueryTab;
-    if (!queryTab.result) return;
-
-    setIsGeneratingVisualization(true);
-    try {
-      const chartConfig = await generateVisualization(queryTab.result);
-      if (chartConfig) {
-        // Update the tab to include visualization and show it
-        updateTab(activeTab.id, {
-          chartConfig,
-          showVisualization: true,
-        });
-      }
-    } catch (error) {
-      console.error('Failed to generate visualization:', error);
-    } finally {
-      setIsGeneratingVisualization(false);
-    }
-  };
 
   // Handle commit changes for query results
   const createQueryCommitHandler = (queryTab: QueryTab) => {
@@ -277,7 +250,7 @@ export function QueryWorkspace() {
                     </ResizablePanel>
                     <ResizableHandle withHandle />
                     <ResizablePanel defaultSize={50} minSize={30}>
-                      <ChartRenderer config={queryTab.chartConfig} data={queryTab.result} />
+                      {queryTab.chartConfig && <ChartRenderer config={queryTab.chartConfig} data={queryTab.result} />}
                     </ResizablePanel>
                   </ResizablePanelGroup>
                 ) : (
@@ -370,10 +343,11 @@ export function QueryWorkspace() {
       return <AiChatTab />;
     }
 
+    // This should never happen, but TypeScript needs this
     return (
       <div className="flex items-center justify-center h-full">
         <p className="text-sm text-muted-foreground">
-          Unsupported tab type: {activeTab.type}
+          Unknown tab type
         </p>
       </div>
     );

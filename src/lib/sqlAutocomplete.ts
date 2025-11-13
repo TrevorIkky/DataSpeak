@@ -4,6 +4,7 @@ export type AutocompleteContext =
   | { type: "keyword"; prefix: string }
   | { type: "table"; prefix: string; afterJoin: boolean }
   | { type: "column"; prefix: string; tables: string[] }
+  | { type: "aliased-column"; prefix: string; alias: string; query: string }
   | { type: "none" };
 
 export interface Suggestion {
@@ -36,6 +37,18 @@ export function detectContext(text: string, cursorPos: number): AutocompleteCont
 
   // Remove any trailing punctuation from the prefix
   const prefix = lastWord.replace(/[,;()]+$/, "");
+
+  // Check if we're typing after an alias (e.g., "tc.")
+  const aliasMatch = prefix.match(/^(\w+)\.(\w*)$/);
+  if (aliasMatch) {
+    const [, alias, columnPrefix] = aliasMatch;
+    return {
+      type: "aliased-column",
+      prefix: columnPrefix,
+      alias,
+      query: text
+    };
+  }
 
   // Check if we're after FROM or JOIN keywords (table context)
   const fromMatch = /\bFROM\s+(\w*)$/i.test(beforeCursor);
@@ -142,6 +155,39 @@ function extractTablesFromQuery(query: string): string[] {
 }
 
 /**
+ * Extracts table aliases from the query
+ * Returns a map of alias -> table name
+ */
+function extractTableAliases(query: string, keywords: SqlKeyword[]): Map<string, string> {
+  const aliasMap = new Map<string, string>();
+
+  // Build keyword set for checking
+  const keywordSet = new Set(keywords.map(k => k.word.toUpperCase()));
+
+  // Match: FROM table AS alias or FROM table alias
+  const fromRegex = /\bFROM\s+(\w+)(?:\s+AS\s+|\s+)(\w+)/gi;
+  let match;
+  while ((match = fromRegex.exec(query)) !== null) {
+    const [, tableName, alias] = match;
+    // Only add if alias is not a SQL keyword
+    if (!keywordSet.has(alias.toUpperCase())) {
+      aliasMap.set(alias.toLowerCase(), tableName);
+    }
+  }
+
+  // Match: JOIN table AS alias or JOIN table alias
+  const joinRegex = /\b(?:INNER\s+|LEFT\s+|RIGHT\s+|OUTER\s+|CROSS\s+)?JOIN\s+(\w+)(?:\s+AS\s+|\s+)(\w+)/gi;
+  while ((match = joinRegex.exec(query)) !== null) {
+    const [, tableName, alias] = match;
+    if (!keywordSet.has(alias.toUpperCase())) {
+      aliasMap.set(alias.toLowerCase(), tableName);
+    }
+  }
+
+  return aliasMap;
+}
+
+/**
  * Generates suggestions based on the context
  */
 export function generateSuggestions(
@@ -158,6 +204,9 @@ export function generateSuggestions(
 
     case "column":
       return generateColumnSuggestions(context.prefix, schema, context.tables);
+
+    case "aliased-column":
+      return generateAliasedColumnSuggestions(context.prefix, context.alias, context.query, schema, keywords);
 
     default:
       return [];
@@ -291,6 +340,69 @@ function generateColumnSuggestions(
 }
 
 /**
+ * Generates column suggestions for aliased table (e.g., tc.COLUMN_NAME)
+ */
+function generateAliasedColumnSuggestions(
+  prefix: string,
+  alias: string,
+  query: string,
+  schema: Schema | null,
+  keywords: SqlKeyword[]
+): Suggestion[] {
+  if (!schema) return [];
+
+  // Extract table aliases from the query
+  const aliasMap = extractTableAliases(query, keywords);
+  const tableName = aliasMap.get(alias.toLowerCase());
+
+  if (!tableName) {
+    // If we can't resolve the alias, return empty
+    return [];
+  }
+
+  // Find the table in the schema
+  const table = schema.tables.find(
+    (t) => t.name.toLowerCase() === tableName.toLowerCase()
+  );
+
+  if (!table) return [];
+
+  // Generate suggestions for columns in this specific table
+  const lowerPrefix = prefix.toLowerCase();
+  const suggestions: Suggestion[] = [];
+
+  for (const column of table.columns) {
+    if (column.name.toLowerCase().startsWith(lowerPrefix)) {
+      const keyIndicators = [];
+      if (column.is_primary_key) keyIndicators.push("🔑");
+      if (column.is_foreign_key) keyIndicators.push("🔗");
+
+      const description = [
+        column.data_type,
+        ...keyIndicators,
+        `(${table.name})`,
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      suggestions.push({
+        label: column.name,
+        value: column.name,
+        description,
+        category: "column" as const,
+        metadata: {
+          dataType: column.data_type,
+          isPrimaryKey: column.is_primary_key,
+          isForeignKey: column.is_foreign_key,
+        },
+      });
+    }
+  }
+
+  return suggestions;
+}
+
+/**
  * Inserts suggestion at cursor position
  */
 export function insertSuggestion(
@@ -304,9 +416,20 @@ export function insertSuggestion(
   // Find the start of the current word
   const words = beforeCursor.split(/\s+/);
   const lastWord = words[words.length - 1] || "";
-  const wordStart = cursorPos - lastWord.length;
 
-  // Replace the current word with the suggestion
+  // Check if we're completing an aliased column (e.g., tc.COL)
+  const aliasMatch = lastWord.match(/^(\w+\.)(\w*)$/);
+  if (aliasMatch) {
+    const [, aliasPrefix, ] = aliasMatch;
+    const wordStart = cursorPos - lastWord.length;
+    // Keep the alias prefix and replace just the column part
+    const newText = text.substring(0, wordStart) + aliasPrefix + suggestion + afterCursor;
+    const newCursorPos = wordStart + aliasPrefix.length + suggestion.length;
+    return { newText, newCursorPos };
+  }
+
+  // Normal completion
+  const wordStart = cursorPos - lastWord.length;
   const newText = text.substring(0, wordStart) + suggestion + afterCursor;
   const newCursorPos = wordStart + suggestion.length;
 

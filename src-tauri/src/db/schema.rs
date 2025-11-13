@@ -93,16 +93,12 @@ async fn get_postgres_schema(
 ) -> AppResult<Schema> {
     let pool = manager.get_pool_postgres(connection_id).await?;
 
-    // Get all tables in public schema with approximate row counts
-    // Using pg_class.reltuples for fast approximate counts instead of COUNT(*)
+    // Get all tables in public schema
     let tables_query = r#"
         SELECT
             t.table_name,
-            t.table_schema,
-            c.reltuples::bigint as row_count
+            t.table_schema
         FROM information_schema.tables t
-        LEFT JOIN pg_class c ON c.relname = t.table_name
-        LEFT JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.table_schema
         WHERE t.table_schema = 'public'
         AND t.table_type = 'BASE TABLE'
         ORDER BY t.table_name
@@ -119,11 +115,12 @@ async fn get_postgres_schema(
             let pool = pool.clone();
             let table_name: String = table_row.try_get("table_name").unwrap();
             let table_schema: String = table_row.try_get("table_schema").unwrap();
-            let row_count: Option<i64> = table_row.try_get("row_count").ok();
             let app_handle = app.clone();
             let loaded_count = Arc::clone(&loaded_count);
 
             async move {
+                // Get accurate row count using COUNT(*)
+                let row_count = get_postgres_row_count(&pool, &table_schema, &table_name).await?;
                 let columns = get_postgres_columns(&pool, &table_schema, &table_name).await?;
                 let indexes = get_postgres_indexes(&pool, &table_schema, &table_name).await?;
                 let triggers = get_postgres_triggers(&pool, &table_schema, &table_name).await?;
@@ -167,6 +164,26 @@ async fn get_postgres_schema(
         database_name: conn.default_database.clone(),
         tables,
     })
+}
+
+async fn get_postgres_row_count(
+    pool: &sqlx::PgPool,
+    schema: &str,
+    table: &str,
+) -> AppResult<Option<i64>> {
+    // Table and schema names come from information_schema, so they're safe
+    // Escape double quotes by doubling them (PostgreSQL standard)
+    let query = format!(
+        "SELECT COUNT(*) FROM \"{}\".\"{}\"",
+        schema.replace('"', "\"\""),
+        table.replace('"', "\"\"")
+    );
+
+    let count: i64 = sqlx::query_scalar(&query)
+        .fetch_one(pool)
+        .await?;
+
+    Ok(Some(count))
 }
 
 async fn get_postgres_columns(
@@ -251,7 +268,7 @@ async fn get_postgres_indexes(
             ix.indisunique as is_unique,
             ix.indisprimary as is_primary,
             am.amname as index_type,
-            array_agg(a.attname ORDER BY array_position(ix.indkey, a.attnum)) as columns
+            COALESCE(array_agg(a.attname::TEXT ORDER BY array_position(ix.indkey, a.attnum)), ARRAY[]::TEXT[]) as columns
         FROM pg_indexes i
         JOIN pg_class c ON c.relname = i.tablename
         JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = i.schemaname
@@ -340,9 +357,9 @@ async fn get_postgres_constraints(
         SELECT
             tc.constraint_name,
             tc.constraint_type,
-            array_agg(DISTINCT kcu.column_name ORDER BY kcu.column_name) as columns,
+            COALESCE(array_agg(DISTINCT kcu.column_name::TEXT ORDER BY kcu.column_name::TEXT) FILTER (WHERE kcu.column_name IS NOT NULL), ARRAY[]::TEXT[]) as columns,
             ccu.table_name as referenced_table,
-            array_agg(DISTINCT ccu.column_name ORDER BY ccu.column_name) FILTER (WHERE ccu.column_name IS NOT NULL) as referenced_columns
+            array_agg(DISTINCT ccu.column_name::TEXT ORDER BY ccu.column_name::TEXT) FILTER (WHERE ccu.column_name IS NOT NULL) as referenced_columns
         FROM information_schema.table_constraints tc
         LEFT JOIN information_schema.key_column_usage kcu
             ON tc.constraint_name = kcu.constraint_name
@@ -634,8 +651,10 @@ async fn get_mysql_constraints(
     let mut constraints = Vec::new();
 
     for row in rows {
-        let columns_str: String = row.try_get("columns")?;
-        let columns_array: Vec<String> = columns_str.split(',').map(|s| s.to_string()).collect();
+        let columns_str: Option<String> = row.try_get("columns")?;
+        let columns_array: Vec<String> = columns_str
+            .map(|s| s.split(',').map(|x| x.to_string()).collect())
+            .unwrap_or_else(Vec::new);
 
         let referenced_columns: Option<Vec<String>> = row
             .try_get::<Option<String>, _>("referenced_columns")

@@ -27,3 +27,15 @@ export type ImportProgress = {
   status: string;
   cancelled: boolean;
 };
+
+export type ExportResult = {
+  success: boolean;
+  message: string;
+  file_path?: string;
+};
+
+export type ImportResult = {
+  success: boolean;
+  message: string;
+  rows_imported?: number;
+};

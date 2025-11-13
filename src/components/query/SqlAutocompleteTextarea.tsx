@@ -7,6 +7,7 @@ import {
   insertSuggestion,
   type Suggestion,
 } from "@/lib/sqlAutocomplete";
+import { highlightSQL } from "@/lib/sqlSyntaxHighlight";
 import type { Schema, SqlKeyword } from "@/types/database.types";
 
 interface SqlAutocompleteTextareaProps {
@@ -35,10 +36,32 @@ export function SqlAutocompleteTextarea({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [highlightedHTML, setHighlightedHTML] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
   const hasTypedRef = useRef(false);
   const lastInsertedPositionRef = useRef<number | null>(null);
+
+  // Update highlighted HTML when value, keywords, or schema changes
+  useEffect(() => {
+    if (!value) {
+      setHighlightedHTML('');
+      return;
+    }
+
+    let cancelled = false;
+
+    highlightSQL(value, { keywords, schema }).then(html => {
+      if (!cancelled) {
+        setHighlightedHTML(html);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [value, keywords, schema]);
 
   // Update cursor position and calculate dropdown position
   useEffect(() => {
@@ -221,21 +244,43 @@ export function SqlAutocompleteTextarea({
     }
   };
 
+  // Sync scroll between textarea and highlight overlay
+  const handleScroll = () => {
+    if (textareaRef.current && highlightRef.current) {
+      highlightRef.current.scrollTop = textareaRef.current.scrollTop;
+      highlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
+    }
+  };
+
   return (
     <div className="relative w-full h-full">
+      {/* Syntax highlighting overlay */}
+      <div
+        ref={highlightRef}
+        className="absolute inset-0 overflow-hidden pointer-events-none whitespace-pre-wrap break-words px-3 py-2 text-base md:text-sm font-mono"
+        dangerouslySetInnerHTML={{ __html: highlightedHTML }}
+      />
+
+      {/* Textarea with transparent text */}
       <Textarea
         ref={textareaRef}
         value={value}
         onChange={handleTextareaChange}
         onKeyDown={handleKeyDown}
         onClick={handleClick}
+        onScroll={handleScroll}
         onBlur={() => {
           // Delay closing to allow click on suggestion
           setTimeout(() => setIsOpen(false), 200);
         }}
         placeholder={placeholder}
         disabled={disabled}
-        className={className}
+        className={`${className} relative z-10 bg-transparent caret-foreground`}
+        style={{
+          color: 'transparent',
+          WebkitTextFillColor: 'transparent',
+        }}
+        spellCheck={false}
       />
 
       {isOpen && suggestions.length > 0 && (

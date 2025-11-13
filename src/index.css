@@ -266,4 +266,135 @@
   .light .shine-text {
     background: radial-gradient(circle at center, rgba(255, 255, 255, 0.85), #f000) -200% 50% / 200% 100% no-repeat, #000;
   }
+
+  /* SQL Syntax Highlighting */
+
+  /* DML keywords (SELECT, INSERT, UPDATE, DELETE) - Bright purple */
+  .sql-keyword-dml {
+    color: oklch(0.55 0.28 285);
+    font-weight: 700;
+  }
+
+  /* Clause keywords (FROM, WHERE, JOIN, etc.) - Electric blue */
+  .sql-keyword-clause {
+    color: oklch(0.52 0.24 250);
+    font-weight: 700;
+  }
+
+  /* Other reserved keywords - Standard blue */
+  .sql-keyword-reserved {
+    color: oklch(0.488 0.243 264.376);
+    font-weight: 600;
+  }
+
+  /* Unreserved keywords - Medium blue */
+  .sql-keyword-unreserved {
+    color: oklch(0.6 0.2 260);
+    font-weight: 600;
+  }
+
+  /* Type keywords (VARCHAR, INT, etc.) - Teal */
+  .sql-keyword-type {
+    color: oklch(0.55 0.15 200);
+    font-weight: 600;
+  }
+
+  /* Function keywords - Magenta */
+  .sql-keyword-function {
+    color: oklch(0.627 0.265 303.9);
+    font-weight: 600;
+  }
+
+  /* Common keywords - Standard blue */
+  .sql-keyword-common {
+    color: oklch(0.52 0.22 270);
+    font-weight: 600;
+  }
+
+  /* Table names - Orange */
+  .sql-table {
+    color: oklch(0.646 0.222 41.116);
+    font-weight: 500;
+  }
+
+  /* Column names - Cyan */
+  .sql-column {
+    color: oklch(0.6 0.118 184.704);
+  }
+
+  /* Strings - Green */
+  .sql-string {
+    color: oklch(0.696 0.17 162.48);
+  }
+
+  /* Numbers - Yellow-green */
+  .sql-number {
+    color: oklch(0.769 0.188 70.08);
+  }
+
+  /* Operators - Gray */
+  .sql-operator {
+    color: oklch(0.556 0 0);
+    font-weight: 500;
+  }
+
+  /* Comments - Gray italic */
+  .sql-comment {
+    color: oklch(0.556 0 0);
+    font-style: italic;
+    opacity: 0.7;
+  }
+
+  /* Dark mode adjustments */
+  .dark .sql-keyword-dml {
+    color: oklch(0.75 0.25 290);
+  }
+
+  .dark .sql-keyword-clause {
+    color: oklch(0.72 0.22 255);
+  }
+
+  .dark .sql-keyword-reserved {
+    color: oklch(0.747 0.184 265.752);
+  }
+
+  .dark .sql-keyword-unreserved {
+    color: oklch(0.78 0.16 262);
+  }
+
+  .dark .sql-keyword-type {
+    color: oklch(0.75 0.13 205);
+  }
+
+  .dark .sql-keyword-function {
+    color: oklch(0.78 0.22 310);
+  }
+
+  .dark .sql-keyword-common {
+    color: oklch(0.72 0.18 272);
+  }
+
+  .dark .sql-table {
+    color: oklch(0.828 0.189 84.429);
+  }
+
+  .dark .sql-column {
+    color: oklch(0.746 0.141 195.365);
+  }
+
+  .dark .sql-string {
+    color: oklch(0.803 0.154 156.743);
+  }
+
+  .dark .sql-number {
+    color: oklch(0.853 0.169 88.207);
+  }
+
+  .dark .sql-operator {
+    color: oklch(0.708 0 0);
+  }
+
+  .dark .sql-comment {
+    color: oklch(0.708 0 0);
+  }
 }

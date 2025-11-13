@@ -1,4 +1,4 @@
-import type { Connection, DatabaseType } from "@/types/database.types";
+import type { DatabaseType } from "@/types/database.types";
 
 export interface IConnectionFormData {
   name: string;

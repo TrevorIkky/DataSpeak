@@ -1,3 +1,3 @@
-pub mod chart_analyzer;
+pub mod plotly_generator;
 
-pub use chart_analyzer::*;
+pub use plotly_generator::generate_plotly_code;

@@ -98,4 +98,11 @@ export interface IUIStore {
   updateAiQuerySql: (generatedSql: string) => void;
   completeAiQueryGeneration: (generatedSql: string, thinkingContent: string) => void;
   setAiQueryError: (error: string) => void;
+  // Mobile view states
+  mobileQueryView: 'editor' | 'results';
+  mobileMapView: 'grid' | 'map';
+  mobileChartView: 'grid' | 'chart';
+  setMobileQueryView: (view: 'editor' | 'results') => void;
+  setMobileMapView: (view: 'grid' | 'map') => void;
+  setMobileChartView: (view: 'grid' | 'chart') => void;
 }

@@ -18,6 +18,7 @@ interface AiQueryFloatingWindowProps {
   onReject: () => void;
   isGenerating: boolean;
   isComplete: boolean;
+  hasSql: boolean;
   thinkingContent?: string;
   error?: string | null;
 }
@@ -30,11 +31,12 @@ export function AiQueryFloatingWindow({
   onReject,
   isGenerating,
   isComplete,
+  hasSql,
   thinkingContent = "",
   error = null,
 }: AiQueryFloatingWindowProps) {
   const [prompt, setPrompt] = useState("");
-  const [phase, setPhase] = useState<"input" | "thinking" | "generated" | "error">("input");
+  const [phase, setPhase] = useState<"input" | "thinking" | "generated" | "no_sql" | "error">("input");
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -50,18 +52,25 @@ export function AiQueryFloatingWindow({
       setPhase("error");
     } else if (phase === "input" && isGenerating) {
       setPhase("thinking");
-    } else if (isComplete && phase !== "input") {
+    } else if (!isGenerating && phase === "thinking") {
+      // Generation finished - check if SQL was generated
+      if (hasSql) {
+        setPhase("generated");
+      } else {
+        setPhase("no_sql");
+      }
+    } else if (isComplete && phase === "thinking") {
       // Transition to generated as soon as SQL is ready, even if still generating
       setPhase("generated");
     }
-  }, [isGenerating, isComplete, phase, error]);
+  }, [isGenerating, isComplete, phase, error, hasSql]);
 
   // Handle escape key
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (phase === "thinking" && !isComplete) {
-          // Don't close during generation
+        if (phase === "thinking" && isGenerating) {
+          // Don't close during active generation
           return;
         }
         onClose();
@@ -70,14 +79,14 @@ export function AiQueryFloatingWindow({
 
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [onClose, phase, isComplete]);
+  }, [onClose, phase, isGenerating]);
 
   // Handle click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
-        if (phase === "thinking" && !isComplete) {
-          // Don't close during generation
+        if (phase === "thinking" && isGenerating) {
+          // Don't close during active generation
           return;
         }
         onClose();
@@ -86,7 +95,7 @@ export function AiQueryFloatingWindow({
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [onClose, phase, isComplete]);
+  }, [onClose, phase, isGenerating]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -236,6 +245,33 @@ export function AiQueryFloatingWindow({
                 >
                   <Check className="h-4 w-4 mr-1" />
                   Approve
+                </Button>
+              </div>
+            </>
+          )}
+
+          {phase === "no_sql" && (
+            <>
+              <div className="flex items-center gap-2 mb-2">
+                <Sparkles className="h-4 w-4 text-muted-foreground" />
+                <h3 className="font-semibold text-sm">Unable to Generate Query</h3>
+              </div>
+
+              {/* AI explanation */}
+              {thinkingContent && (
+                <div className="text-sm p-3 bg-muted/50 rounded border border-border max-h-48 overflow-y-auto">
+                  {thinkingContent}
+                </div>
+              )}
+
+              {/* Close button */}
+              <div className="flex justify-end pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onClose}
+                >
+                  Close
                 </Button>
               </div>
             </>

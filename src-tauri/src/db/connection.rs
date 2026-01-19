@@ -1,7 +1,9 @@
 use crate::error::{AppError, AppResult};
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, PgPool, Pool, Postgres, MySql};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,31 +54,39 @@ impl ConnectionManager {
         }
     }
 
+    /// Build a properly encoded connection URL for the given connection.
+    /// Handles special characters in username, password, and database name.
+    fn build_connection_url(conn: &Connection) -> String {
+        // Percent-encode credentials to handle special characters like @, :, /, etc.
+        let username = utf8_percent_encode(&conn.username, NON_ALPHANUMERIC).to_string();
+        let password = utf8_percent_encode(&conn.password, NON_ALPHANUMERIC).to_string();
+        let database = utf8_percent_encode(&conn.default_database, NON_ALPHANUMERIC).to_string();
+
+        match conn.database_type {
+            DatabaseType::PostgreSQL => format!(
+                "postgresql://{}:{}@{}:{}/{}",
+                username, password, conn.host, conn.port, database
+            ),
+            DatabaseType::MariaDB | DatabaseType::MySQL => format!(
+                "mysql://{}:{}@{}:{}/{}",
+                username, password, conn.host, conn.port, database
+            ),
+        }
+    }
+
     pub async fn test_connection(&self, conn: &Connection) -> AppResult<()> {
+        let url = Self::build_connection_url(conn);
+
         match conn.database_type {
             DatabaseType::PostgreSQL => {
-                let url = format!(
-                    "postgresql://{}:{}@{}:{}/{}",
-                    conn.username, conn.password, conn.host, conn.port, conn.default_database
-                );
                 let pool = PgPool::connect(&url).await?;
-
-                // Test the connection
                 sqlx::query("SELECT 1").fetch_one(&pool).await?;
-
                 pool.close().await;
                 Ok(())
             }
             DatabaseType::MariaDB | DatabaseType::MySQL => {
-                let url = format!(
-                    "mysql://{}:{}@{}:{}/{}",
-                    conn.username, conn.password, conn.host, conn.port, conn.default_database
-                );
                 let pool = MySqlPool::connect(&url).await?;
-
-                // Test the connection
                 sqlx::query("SELECT 1").fetch_one(&pool).await?;
-
                 pool.close().await;
                 Ok(())
             }
@@ -84,7 +94,7 @@ impl ConnectionManager {
     }
 
     pub async fn get_pool_postgres(&self, connection_id: &str) -> AppResult<Pool<Postgres>> {
-        // Check if pool exists
+        // Fast path: check if pool already exists
         {
             let pools = self.postgres_pools.lock().map_err(|e| {
                 AppError::ConnectionError(format!("Failed to lock postgres pools: {}", e))
@@ -93,9 +103,9 @@ impl ConnectionManager {
             if let Some(pool) = pools.get(connection_id) {
                 return Ok(pool.clone());
             }
-        } // Lock is dropped here
+        }
 
-        // Get connection details
+        // Get connection details and build URL (outside of lock)
         let url = {
             let connections = self.connections.lock().map_err(|e| {
                 AppError::ConnectionError(format!("Failed to lock connections: {}", e))
@@ -106,27 +116,27 @@ impl ConnectionManager {
                 .find(|c| c.id == connection_id)
                 .ok_or_else(|| AppError::ConnectionError("Connection not found".to_string()))?;
 
-            format!(
-                "postgresql://{}:{}@{}:{}/{}",
-                conn.username, conn.password, conn.host, conn.port, conn.default_database
-            )
-        }; // Lock is dropped here
+            Self::build_connection_url(conn)
+        };
 
+        // Connect outside of lock to avoid blocking other operations
         let pool = PgPool::connect(&url).await?;
 
-        // Store the pool
-        {
-            let mut pools = self.postgres_pools.lock().map_err(|e| {
-                AppError::ConnectionError(format!("Failed to lock postgres pools: {}", e))
-            })?;
-            pools.insert(connection_id.to_string(), pool.clone());
-        } // Lock is dropped here
+        // Use entry API to handle race condition gracefully
+        // If another thread created the pool while we were connecting,
+        // we'll use their pool and drop ours
+        let mut pools = self.postgres_pools.lock().map_err(|e| {
+            AppError::ConnectionError(format!("Failed to lock postgres pools: {}", e))
+        })?;
 
-        Ok(pool)
+        Ok(match pools.entry(connection_id.to_string()) {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => entry.insert(pool).clone(),
+        })
     }
 
     pub async fn get_pool_mysql(&self, connection_id: &str) -> AppResult<Pool<MySql>> {
-        // Check if pool exists
+        // Fast path: check if pool already exists
         {
             let pools = self.mysql_pools.lock().map_err(|e| {
                 AppError::ConnectionError(format!("Failed to lock mysql pools: {}", e))
@@ -135,9 +145,9 @@ impl ConnectionManager {
             if let Some(pool) = pools.get(connection_id) {
                 return Ok(pool.clone());
             }
-        } // Lock is dropped here
+        }
 
-        // Get connection details
+        // Get connection details and build URL (outside of lock)
         let url = {
             let connections = self.connections.lock().map_err(|e| {
                 AppError::ConnectionError(format!("Failed to lock connections: {}", e))
@@ -148,23 +158,21 @@ impl ConnectionManager {
                 .find(|c| c.id == connection_id)
                 .ok_or_else(|| AppError::ConnectionError("Connection not found".to_string()))?;
 
-            format!(
-                "mysql://{}:{}@{}:{}/{}",
-                conn.username, conn.password, conn.host, conn.port, conn.default_database
-            )
-        }; // Lock is dropped here
+            Self::build_connection_url(conn)
+        };
 
+        // Connect outside of lock to avoid blocking other operations
         let pool = MySqlPool::connect(&url).await?;
 
-        // Store the pool
-        {
-            let mut pools = self.mysql_pools.lock().map_err(|e| {
-                AppError::ConnectionError(format!("Failed to lock mysql pools: {}", e))
-            })?;
-            pools.insert(connection_id.to_string(), pool.clone());
-        } // Lock is dropped here
+        // Use entry API to handle race condition gracefully
+        let mut pools = self.mysql_pools.lock().map_err(|e| {
+            AppError::ConnectionError(format!("Failed to lock mysql pools: {}", e))
+        })?;
 
-        Ok(pool)
+        Ok(match pools.entry(connection_id.to_string()) {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => entry.insert(pool).clone(),
+        })
     }
 
     pub fn save_connection(&self, conn: Connection) -> AppResult<Connection> {

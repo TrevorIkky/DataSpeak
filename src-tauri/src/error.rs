@@ -45,6 +45,9 @@ pub enum AppError {
     #[error("Operation cancelled: {0}")]
     OperationCancelled(String),
 
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+
     #[error("{0}")]
     Other(String),
 }

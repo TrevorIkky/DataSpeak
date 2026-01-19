@@ -297,7 +297,8 @@ async fn stream_ai_chat(
             Vec::new()
         });
 
-        let result = ai::run_react_agent(
+        // Use MAC-SQL multi-agent pipeline for better accuracy
+        let result = ai::run_mac_sql_agent(
             session_id.clone(),
             connection_id.clone(),
             message.clone(),
@@ -350,6 +351,14 @@ async fn clear_conversation(
     session_id: String,
 ) -> AppResult<()> {
     ai::clear_conversation(&app, &session_id)
+}
+
+#[tauri::command]
+async fn list_conversations(
+    app: tauri::AppHandle,
+    connection_id: String,
+) -> AppResult<Vec<ai::ConversationMetadata>> {
+    ai::list_conversations(&app, &connection_id)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -461,6 +470,7 @@ pub fn run() {
             stream_ai_chat,
             get_conversation_history,
             clear_conversation,
+            list_conversations,
             storage::stronghold::stronghold_save_connection,
             storage::stronghold::stronghold_delete_connection,
             storage::stronghold::stronghold_get_connection_ids,

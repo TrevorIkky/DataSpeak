@@ -10,7 +10,6 @@ import {
   Edit,
   Download,
   Upload,
-  Loader2,
   Columns3,
   Key,
   Shield,
@@ -23,6 +22,7 @@ import {
 import { ErrorHandler } from "@/lib/ErrorHandler";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Collapsible,
   CollapsibleContent,
@@ -403,10 +403,7 @@ function ConnectionItem({ connection, isActive, isOpen: controlledIsOpen, onTogg
       <ContextMenu>
         <ContextMenuTrigger>
           <Collapsible open={isOpen} onOpenChange={handleOpenChange}>
-            <div
-              className={`rounded-lg mb-2 transition-all ${isActive ? "bg-primary/5" : ""
-                }`}
-            >
+            <div className="rounded-lg mb-2 transition-all">
               <CollapsibleTrigger className="w-full px-3 py-2.5 flex items-center justify-between hover:bg-accent/50 rounded-lg transition-colors">
                 <div className="flex items-center gap-2 flex-1 min-w-0">
                   {isOpen ? (
@@ -427,9 +424,10 @@ function ConnectionItem({ connection, isActive, isOpen: controlledIsOpen, onTogg
                   <div className="px-2 pb-2">
                     {/* Tables List */}
                     {schemaLoading && (!schema || schema.tables.length === 0) ? (
-                      <div className="flex flex-col items-center justify-center py-4 text-center">
-                        <Loader2 className="h-6 w-6 animate-spin text-primary mb-2" />
-                        <p className="text-xs text-muted-foreground">Loading schema...</p>
+                      <div className="space-y-2 px-2 py-2">
+                        {Array.from({ length: 6 }).map((_, i) => (
+                          <Skeleton key={i} className="h-6 w-full mx-4" />
+                        ))}
                       </div>
                     ) : schema && schema.tables.length > 0 ? (
                       <div className="space-y-1">
@@ -663,7 +661,7 @@ export function DatabaseNavigator() {
         </div>
 
         <ScrollArea className="flex-1">
-          <div className="p-3">
+          <div className="p-3 safe-area-bottom">
             {connections.map((connection) => (
               <ConnectionItem
                 key={connection.id}

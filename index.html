@@ -3,8 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, maximum-scale=1.0" />
     <title>DataSpeak</title>
+    <script>
+      // Prevent flash of unstyled content (FOUC) by setting theme before page renders
+      (function() {
+        const storageKey = 'dataspeak-theme';
+        const defaultTheme = 'system';
+
+        function getTheme() {
+          let theme;
+          try {
+            theme = localStorage.getItem(storageKey);
+          } catch (e) {
+            // localStorage might be blocked
+          }
+          return theme || defaultTheme;
+        }
+
+        function getSystemTheme() {
+          return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+
+        const theme = getTheme();
+        const resolvedTheme = theme === 'system' ? getSystemTheme() : theme;
+
+        // Remove any existing theme classes first
+        document.documentElement.classList.remove('light', 'dark');
+
+        // Add the resolved theme class
+        if (resolvedTheme) {
+          document.documentElement.classList.add(resolvedTheme);
+        }
+      })();
+    </script>
   </head>
 
   <body>

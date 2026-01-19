@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { QueryEditor } from "./QueryEditor";
 import { EditableDataGrid } from "./EditableDataGrid";
 import { TableDataTab } from "./TableDataTab";
@@ -6,8 +6,18 @@ import { ChartRenderer } from "@/components/visualization/ChartRenderer";
 import { AiChatTab } from "@/components/ai/AiChatTab";
 import { MapViewer } from "@/components/map/MapViewer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle, Database, X, Plus, Maximize2, BarChart3, Table as TableIcon, MessageCircleMore, Code } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AlertCircle, Database, X, Plus, Maximize2, BarChart3, Table as TableIcon, MessageCircleMore, Code, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import {
   Popover,
@@ -46,9 +56,10 @@ interface SortableTabProps {
   isActive: boolean;
   onSelect: () => void;
   onRemove: (e: React.MouseEvent) => void;
+  isMobile: boolean;
 }
 
-function SortableTab({ tab, isActive, onSelect, onRemove }: SortableTabProps) {
+function SortableTab({ tab, isActive, onSelect, onRemove, isMobile }: SortableTabProps) {
   const {
     attributes,
     listeners,
@@ -56,7 +67,7 @@ function SortableTab({ tab, isActive, onSelect, onRemove }: SortableTabProps) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: tab.id });
+  } = useSortable({ id: tab.id, disabled: isMobile });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -68,17 +79,18 @@ function SortableTab({ tab, isActive, onSelect, onRemove }: SortableTabProps) {
     <button
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
+      data-tab-id={tab.id}
+      {...(isMobile ? {} : { ...attributes, ...listeners })}
       onClick={onSelect}
       className={`
-        flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors touch-none
+        flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors shrink-0
+        ${!isMobile ? "touch-none" : ""}
         ${
           isActive
             ? "bg-primary/10 text-primary border border-primary/20"
             : "hover:bg-accent"
         }
-        ${isDragging ? "cursor-grabbing" : "cursor-grab"}
+        ${isDragging ? "cursor-grabbing" : isMobile ? "cursor-pointer" : "cursor-grab"}
       `}
     >
       <span className="truncate max-w-[150px]" title={tab.title}>{tab.title}</span>
@@ -106,7 +118,19 @@ export function QueryWorkspace() {
     setSelectedGeography,
     isMapFullscreen,
     setIsMapFullscreen,
+    mobileQueryView,
+    setMobileQueryView,
+    mobileMapView,
+    setMobileMapView,
+    mobileChartView,
+    setMobileChartView,
   } = useUIStore();
+
+  const isMobile = useIsMobile();
+
+  // Ref for tabs container to enable auto-scroll
+  const tabsContainerRef = useRef<HTMLDivElement>(null);
+  const prevTabCountRef = useRef(tabs.length);
 
   // State for drag overlay
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -120,12 +144,19 @@ export function QueryWorkspace() {
     })
   );
 
-  // Create initial tab if none exists
+  // Auto-scroll to new tab when added
   useEffect(() => {
-    if (tabs.length === 0) {
-      addTab();
+    const wasTabAdded = tabs.length > prevTabCountRef.current;
+    prevTabCountRef.current = tabs.length;
+
+    if (wasTabAdded && tabsContainerRef.current) {
+      // Scroll to end where new tab appears
+      tabsContainerRef.current.scrollTo({
+        left: tabsContainerRef.current.scrollWidth,
+        behavior: 'smooth'
+      });
     }
-  }, [tabs.length, addTab]);
+  }, [tabs.length]);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const hasChatTab = tabs.some((t) => t.type === 'chat');
@@ -199,9 +230,23 @@ export function QueryWorkspace() {
   const renderTabContent = () => {
     if (!activeTab) {
       return (
-        <div className="flex items-center justify-center h-full">
-          <p className="text-sm text-muted-foreground">No active tab</p>
-        </div>
+        <Empty className="h-full">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Code />
+            </EmptyMedia>
+            <EmptyTitle>No Open Tabs</EmptyTitle>
+            <EmptyDescription>
+              Create a new query tab or select a table from the navigator to get started
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button onClick={() => addTab()} size="sm">
+              <Plus className="h-4 w-4 mr-2" />
+              New Query
+            </Button>
+          </EmptyContent>
+        </Empty>
       );
     }
 
@@ -227,6 +272,138 @@ export function QueryWorkspace() {
         }
       }
 
+      // Mobile Layout: Tabbed Editor/Results
+      if (isMobile) {
+        return (
+          <div className="flex flex-col h-full">
+            {/* Mobile Tab Switcher */}
+            <Tabs value={mobileQueryView} onValueChange={(v) => setMobileQueryView(v as 'editor' | 'results')} className="flex flex-col h-full">
+              <div className="flex items-center justify-start px-4 py-2 border-b bg-card">
+                <TabsList className="h-9">
+                  <TabsTrigger value="editor" className="flex items-center gap-2 px-4">
+                    <Code className="h-4 w-4" />
+                    Editor
+                  </TabsTrigger>
+                  <TabsTrigger value="results" className="flex items-center gap-2 px-4">
+                    <TableIcon className="h-4 w-4" />
+                    Results
+                    {queryTab.result && (
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        ({queryTab.result.row_count})
+                      </span>
+                    )}
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+
+              {/* Mobile Content */}
+              <TabsContent value="editor" className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden">
+                <QueryEditor />
+              </TabsContent>
+              <TabsContent value="results" className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden">
+                <div className="h-full flex flex-col">
+                  {queryTab.error ? (
+                    <div className="p-4">
+                      <Alert variant="destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription>{queryTab.error}</AlertDescription>
+                      </Alert>
+                    </div>
+                  ) : queryTab.result ? (
+                    hasMapView ? (
+                      // Mobile Map View with tabs
+                      <Tabs value={mobileMapView} onValueChange={(v) => setMobileMapView(v as 'grid' | 'map')} className="flex flex-col h-full">
+                        <div className="flex items-center justify-between px-4 py-2 border-b bg-card">
+                          <TabsList className="h-9">
+                            <TabsTrigger value="grid" className="flex items-center gap-2 px-4">
+                              <TableIcon className="h-4 w-4" />
+                              Data
+                            </TabsTrigger>
+                            <TabsTrigger value="map" className="flex items-center gap-2 px-4">
+                              <MapPin className="h-4 w-4" />
+                              Map
+                            </TabsTrigger>
+                          </TabsList>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSelectedGeography(null)}
+                            className="h-9"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <TabsContent value="grid" className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden">
+                          <EditableDataGrid
+                            result={queryTab.result}
+                            onGeographicCellClick={setSelectedGeography}
+                            tableName={tableName}
+                            primaryKeyColumns={primaryKeyColumns}
+                            onCommitChanges={createQueryCommitHandler(queryTab)}
+                          />
+                        </TabsContent>
+                        <TabsContent value="map" className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden">
+                          <MapViewer
+                            geometry={selectedGeography.geometry}
+                            columnName={selectedGeography.columnName}
+                            rowIndex={selectedGeography.rowIndex}
+                            onClose={() => setSelectedGeography(null)}
+                            isFullscreen={false}
+                          />
+                        </TabsContent>
+                      </Tabs>
+                    ) : hasVisualization ? (
+                      // Mobile Chart View with tabs
+                      <Tabs value={mobileChartView} onValueChange={(v) => setMobileChartView(v as 'grid' | 'chart')} className="flex flex-col h-full">
+                        <div className="flex items-center justify-start px-4 py-2 border-b bg-card">
+                          <TabsList className="h-9">
+                            <TabsTrigger value="grid" className="flex items-center gap-2 px-4">
+                              <TableIcon className="h-4 w-4" />
+                              Data
+                            </TabsTrigger>
+                            <TabsTrigger value="chart" className="flex items-center gap-2 px-4">
+                              <BarChart3 className="h-4 w-4" />
+                              Chart
+                            </TabsTrigger>
+                          </TabsList>
+                        </div>
+                        <TabsContent value="grid" className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden">
+                          <EditableDataGrid
+                            result={queryTab.result}
+                            onGeographicCellClick={setSelectedGeography}
+                            tableName={tableName}
+                            primaryKeyColumns={primaryKeyColumns}
+                            onCommitChanges={createQueryCommitHandler(queryTab)}
+                          />
+                        </TabsContent>
+                        <TabsContent value="chart" className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden">
+                          {queryTab.chartConfig && <ChartRenderer config={queryTab.chartConfig} data={queryTab.result} />}
+                        </TabsContent>
+                      </Tabs>
+                    ) : (
+                      <EditableDataGrid
+                        result={queryTab.result}
+                        onGeographicCellClick={setSelectedGeography}
+                        tableName={tableName}
+                        primaryKeyColumns={primaryKeyColumns}
+                        onCommitChanges={createQueryCommitHandler(queryTab)}
+                      />
+                    )
+                  ) : (
+                    <div className="flex items-center justify-center h-full">
+                      <p className="text-sm text-muted-foreground">
+                        Execute a query to see results here
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
+        );
+      }
+
+      // Desktop Layout: 40/60 split
       return (
         <div className="flex flex-col h-full">
           {/* Query Editor - Takes 40% */}
@@ -471,7 +648,7 @@ export function QueryWorkspace() {
             items={tabs.map((tab) => tab.id)}
             strategy={horizontalListSortingStrategy}
           >
-            <div className="flex-1 flex items-center gap-1 overflow-x-auto">
+            <div ref={tabsContainerRef} className="flex-1 flex items-center gap-1 overflow-x-auto scrollbar-none">
               {tabs.map((tab) => (
                 <SortableTab
                   key={tab.id}
@@ -482,6 +659,7 @@ export function QueryWorkspace() {
                     e.stopPropagation();
                     removeTab(tab.id);
                   }}
+                  isMobile={isMobile}
                 />
               ))}
             </div>

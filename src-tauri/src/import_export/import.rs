@@ -1,9 +1,12 @@
 use crate::db::connection::{ConnectionManager, DatabaseType};
 use crate::error::{AppError, AppResult};
+use crate::import_export::export::CSV_NULL_MARKER;
 use csv::ReaderBuilder;
 use futures::stream::{self, StreamExt};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
+use sqlparser::dialect::{MySqlDialect, PostgreSqlDialect};
+use sqlparser::parser::Parser;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufReader, Read, Write};
@@ -12,6 +15,65 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
+
+/// Safely quote a PostgreSQL identifier (table/column name)
+fn quote_identifier_postgres(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+/// Safely quote a MySQL identifier (table/column name)
+fn quote_identifier_mysql(identifier: &str) -> String {
+    format!("`{}`", identifier.replace('`', "``"))
+}
+
+/// Validate schema SQL to prevent malicious statements
+/// Only allows: CREATE TABLE, DROP TABLE IF EXISTS, ALTER TABLE, CREATE INDEX
+fn validate_schema_sql(sql: &str, db_type: &DatabaseType) -> AppResult<()> {
+    use sqlparser::ast::Statement;
+
+    let statements = match db_type {
+        DatabaseType::PostgreSQL => {
+            Parser::parse_sql(&PostgreSqlDialect {}, sql).map_err(|e| {
+                AppError::ValidationError(format!("Invalid SQL syntax: {}", e))
+            })?
+        }
+        DatabaseType::MariaDB | DatabaseType::MySQL => {
+            Parser::parse_sql(&MySqlDialect {}, sql).map_err(|e| {
+                AppError::ValidationError(format!("Invalid SQL syntax: {}", e))
+            })?
+        }
+    };
+
+    for stmt in statements {
+        let allowed = matches!(
+            stmt,
+            Statement::CreateTable { .. }
+                | Statement::CreateIndex { .. }
+                | Statement::AlterTable { .. }
+                | Statement::Drop { .. }
+        );
+
+        if !allowed {
+            return Err(AppError::ValidationError(format!(
+                "Schema file contains disallowed statement type. Only CREATE TABLE, DROP TABLE, ALTER TABLE, and CREATE INDEX are allowed. Found: {}",
+                stmt.to_string().chars().take(50).collect::<String>()
+            )));
+        }
+
+        // Extra check for DROP: only allow DROP TABLE, not DROP DATABASE
+        if let Statement::Drop { object_type, .. } = &stmt {
+            let object_str = format!("{:?}", object_type);
+            if !object_str.contains("Table") {
+                return Err(AppError::ValidationError(format!(
+                    "Only DROP TABLE is allowed, found DROP {:?}",
+                    object_type
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportProgress {
@@ -261,6 +323,9 @@ async fn import_schema(
         AppError::IoError(format!("Failed to read schema file: {}", e))
     })?;
 
+    // Validate schema SQL before execution to prevent malicious statements
+    validate_schema_sql(&schema_content, db_type)?;
+
     match db_type {
         DatabaseType::PostgreSQL => {
             let pool = manager.get_pool_postgres(connection_id).await?;
@@ -417,7 +482,7 @@ async fn insert_postgres_batch(
 
     let columns = column_names
         .iter()
-        .map(|c| format!("\"{}\"", c))
+        .map(|c| quote_identifier_postgres(c))
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -442,18 +507,19 @@ async fn insert_postgres_batch(
     }
 
     let query = format!(
-        "INSERT INTO \"{}\" ({}) VALUES {}",
-        table_name,
+        "INSERT INTO {} ({}) VALUES {}",
+        quote_identifier_postgres(table_name),
         columns,
         placeholders.join(", ")
     );
 
     let mut query_builder = sqlx::query(&query);
     for value in values {
-        // Convert empty strings to NULL for proper handling of datetime, int, etc.
-        if value.is_empty() {
+        // Handle NULL marker from CSV export (PostgreSQL COPY convention)
+        // Empty strings are now preserved as empty strings for VARCHAR/TEXT columns
+        if value == CSV_NULL_MARKER {
             query_builder = query_builder.bind(None::<String>);
-        } else if value.starts_with("\\x") {
+        } else if value.starts_with("\\x") && value.len() > 2 && value != CSV_NULL_MARKER {
             // PostgreSQL hex format for BYTEA columns
             match hex::decode(&value[2..]) {
                 Ok(bytes) => query_builder = query_builder.bind(bytes),
@@ -505,7 +571,7 @@ async fn insert_mysql_batch(
 
     let columns = column_names
         .iter()
-        .map(|c| format!("`{}`", c))
+        .map(|c| quote_identifier_mysql(c))
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -518,8 +584,8 @@ async fn insert_mysql_batch(
         .collect();
 
     let query = format!(
-        "INSERT INTO `{}` ({}) VALUES {}",
-        table_name,
+        "INSERT INTO {} ({}) VALUES {}",
+        quote_identifier_mysql(table_name),
         columns,
         placeholders.join(", ")
     );
@@ -527,16 +593,16 @@ async fn insert_mysql_batch(
     let mut query_builder = sqlx::query(&query);
     for record in batch {
         for value in record {
-            // Strategy: Empty strings become NULL
-            // - For nullable columns: NULL is valid
-            // - For NOT NULL with explicit DEFAULT: MySQL uses the default
-            // - For NOT NULL without DEFAULT: Import fails with clear error (correct!)
-            // This maintains data integrity by not inserting invalid zero dates
-            if value.is_empty() {
+            // Handle NULL marker from CSV export (PostgreSQL COPY convention)
+            // Empty strings are now preserved as empty strings for VARCHAR/TEXT columns
+            if value == CSV_NULL_MARKER {
                 query_builder = query_builder.bind(None::<String>);
-            } else if value.starts_with("0x") || value.starts_with("0X") {
+            } else if (value.starts_with("\\x") && value.len() > 2) ||
+                      value.starts_with("0x") || value.starts_with("0X") {
                 // Decode hex strings back to binary (for BLOB/VARBINARY columns)
-                match hex::decode(&value[2..]) {
+                // Supports both PostgreSQL (\x) and MySQL (0x) hex formats
+                let hex_start = if value.starts_with("\\x") { 2 } else { 2 };
+                match hex::decode(&value[hex_start..]) {
                     Ok(bytes) => query_builder = query_builder.bind(bytes),
                     Err(_) => query_builder = query_builder.bind(value), // Fallback to string if not valid hex
                 }

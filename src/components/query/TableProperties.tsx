@@ -22,7 +22,7 @@ export function TableProperties({ table, tableName }: TablePropertiesProps) {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-auto p-4 space-y-3">
+    <div className="flex flex-col h-full overflow-auto p-4 space-y-3 safe-area-bottom">
       {/* Table Information Card */}
       <Card>
         <CardHeader className="pb-3">

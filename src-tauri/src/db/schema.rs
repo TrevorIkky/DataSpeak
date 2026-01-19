@@ -1,11 +1,15 @@
 use crate::db::connection::{Connection, ConnectionManager, DatabaseType};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use futures::future::join_all;
 use tauri::{AppHandle, Emitter};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+/// Timeout for loading individual table metadata (30 seconds)
+const TABLE_QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schema {
@@ -119,21 +123,38 @@ async fn get_postgres_schema(
             let loaded_count = Arc::clone(&loaded_count);
 
             async move {
-                // Get accurate row count using COUNT(*)
-                let row_count = get_postgres_row_count(&pool, &table_schema, &table_name).await?;
-                let columns = get_postgres_columns(&pool, &table_schema, &table_name).await?;
-                let indexes = get_postgres_indexes(&pool, &table_schema, &table_name).await?;
-                let triggers = get_postgres_triggers(&pool, &table_schema, &table_name).await?;
-                let constraints = get_postgres_constraints(&pool, &table_schema, &table_name).await?;
+                let table_name_for_error = table_name.clone();
 
-                let table = Table {
-                    name: table_name,
-                    schema: Some(table_schema),
-                    row_count,
-                    columns,
-                    indexes,
-                    triggers,
-                    constraints,
+                // Wrap all table metadata queries in a timeout
+                let result = tokio::time::timeout(TABLE_QUERY_TIMEOUT, async {
+                    // Get accurate row count using COUNT(*)
+                    let row_count = get_postgres_row_count(&pool, &table_schema, &table_name).await?;
+                    let columns = get_postgres_columns(&pool, &table_schema, &table_name).await?;
+                    let indexes = get_postgres_indexes(&pool, &table_schema, &table_name).await?;
+                    let triggers = get_postgres_triggers(&pool, &table_schema, &table_name).await?;
+                    let constraints = get_postgres_constraints(&pool, &table_schema, &table_name).await?;
+
+                    Ok::<Table, AppError>(Table {
+                        name: table_name,
+                        schema: Some(table_schema),
+                        row_count,
+                        columns,
+                        indexes,
+                        triggers,
+                        constraints,
+                    })
+                })
+                .await;
+
+                let table = match result {
+                    Ok(Ok(t)) => t,
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => {
+                        return Err(AppError::DatabaseError(format!(
+                            "Timeout loading table metadata for '{}'",
+                            table_name_for_error
+                        )));
+                    }
                 };
 
                 // Increment counter and emit event
@@ -429,19 +450,36 @@ async fn get_mysql_schema(
             let loaded_count = Arc::clone(&loaded_count);
 
             async move {
-                let columns = get_mysql_columns(&pool, &database, &table_name).await?;
-                let indexes = get_mysql_indexes(&pool, &database, &table_name).await?;
-                let triggers = get_mysql_triggers(&pool, &database, &table_name).await?;
-                let constraints = get_mysql_constraints(&pool, &database, &table_name).await?;
+                let table_name_for_error = table_name.clone();
 
-                let table = Table {
-                    name: table_name,
-                    schema: None,
-                    row_count,
-                    columns,
-                    indexes,
-                    triggers,
-                    constraints,
+                // Wrap all table metadata queries in a timeout
+                let result = tokio::time::timeout(TABLE_QUERY_TIMEOUT, async {
+                    let columns = get_mysql_columns(&pool, &database, &table_name).await?;
+                    let indexes = get_mysql_indexes(&pool, &database, &table_name).await?;
+                    let triggers = get_mysql_triggers(&pool, &database, &table_name).await?;
+                    let constraints = get_mysql_constraints(&pool, &database, &table_name).await?;
+
+                    Ok::<Table, AppError>(Table {
+                        name: table_name,
+                        schema: None,
+                        row_count,
+                        columns,
+                        indexes,
+                        triggers,
+                        constraints,
+                    })
+                })
+                .await;
+
+                let table = match result {
+                    Ok(Ok(t)) => t,
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => {
+                        return Err(AppError::DatabaseError(format!(
+                            "Timeout loading table metadata for '{}'",
+                            table_name_for_error
+                        )));
+                    }
                 };
 
                 // Increment counter and emit event

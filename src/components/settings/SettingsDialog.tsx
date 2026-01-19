@@ -85,13 +85,13 @@ export function SettingsDialog() {
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col">
-            <ScrollArea className="h-[450px] px-6">
-              <div className="space-y-6 py-4">
+            <ScrollArea className="h-[450px]">
+              <div className="space-y-6 py-4 px-6">
                 <div className="space-y-2">
                   <label className="text-sm font-medium leading-none">
                     Theme
                   </label>
-                  <Select value={theme} onValueChange={(value: "light" | "dark" | "system") => setTheme(value)}>
+                  <Select value={theme || "system"} onValueChange={setTheme}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select theme" />
                     </SelectTrigger>

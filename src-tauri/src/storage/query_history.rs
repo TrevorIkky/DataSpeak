@@ -55,10 +55,17 @@ fn load_history() -> AppResult<QueryHistory> {
 
     let json = fs::read_to_string(&path)
         .map_err(|e| AppError::StorageError(format!("Failed to read query history: {}", e)))?;
-    let history: QueryHistory = serde_json::from_str(&json)
-        .map_err(|e| AppError::StorageError(format!("Failed to parse query history: {}", e)))?;
 
-    Ok(history)
+    // Try to parse the history, if it fails (corrupted file), reset to empty
+    match serde_json::from_str::<QueryHistory>(&json) {
+        Ok(history) => Ok(history),
+        Err(e) => {
+            eprintln!("Query history file corrupted, resetting: {}", e);
+            // Delete the corrupted file and return empty history
+            let _ = fs::remove_file(&path);
+            Ok(QueryHistory::default())
+        }
+    }
 }
 
 fn save_history(history: &QueryHistory) -> AppResult<()> {

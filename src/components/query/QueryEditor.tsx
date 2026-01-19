@@ -1,11 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { Play, Loader2, ChevronDown, Sparkles } from "lucide-react";
+import { Play, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import {
   Tooltip,
   TooltipContent,
@@ -35,7 +30,6 @@ export function QueryEditor() {
   const { schema, keywords, fetchKeywords } = useSchemaStore();
   const {
     executionMode,
-    setExecutionMode,
     aiQueryWindowOpen,
     aiQueryWindowPosition,
     aiQueryOriginalQuery,
@@ -57,7 +51,6 @@ export function QueryEditor() {
   const queryTab = activeTab?.type === 'query' ? activeTab : null;
   const [query, setQuery] = useState(queryTab?.query || "");
   const [cursorPosition, setCursorPosition] = useState(0);
-  const [executionMenuOpen, setExecutionMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Sync local query state with active tab
@@ -259,121 +252,42 @@ export function QueryEditor() {
         <div className="flex items-center gap-2">
           <QueryHistoryDialog onSelectQuery={handleInsertQuery} />
 
-          <div className="flex items-center gap-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="sm"
-                  onClick={() => handleExecute()}
-                  disabled={!activeConnection || !query.trim() || isExecuting}
-                  className="rounded-r-none border-r-0"
-                >
-                  {isExecuting ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Executing...
-                    </>
-                  ) : (
-                    <>
-                      <Play className="h-4 w-4 mr-2" />
-                      {executionLabel}
-                    </>
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <KbdGroup>
-                  <Kbd>⌘</Kbd>
-                  <Kbd>↵</Kbd>
-                </KbdGroup>
-                {' or '}
-                <KbdGroup>
-                  <Kbd>Ctrl</Kbd>
-                  <Kbd>↵</Kbd>
-                </KbdGroup>
-              </TooltipContent>
-            </Tooltip>
-
-            <Popover open={executionMenuOpen} onOpenChange={setExecutionMenuOpen} modal={false}>
-              <PopoverTrigger asChild>
-                <Button
-                  size="sm"
-                  disabled={!activeConnection || !query.trim() || isExecuting}
-                  className="rounded-l-none px-2"
-                  title="Execution options"
-                >
-                  <ChevronDown className="h-4 w-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80 p-2 z-[100]" align="end" side="bottom" sideOffset={8}>
-                <div className="space-y-1">
-                  <button
-                    className="w-full flex flex-col gap-1 px-3 py-2 hover:bg-accent rounded-md transition-colors text-left"
-                    onClick={() => {
-                      setExecutionMode('current');
-                      handleExecute('current');
-                      setExecutionMenuOpen(false);
-                    }}
-                  >
-                    <span className="font-medium text-sm">Execute Current Statement</span>
-                    <div className="flex items-center gap-1">
-                      <KbdGroup>
-                        <Kbd>⌘</Kbd>
-                        <Kbd>↵</Kbd>
-                      </KbdGroup>
-                      <span className="text-xs text-muted-foreground">or</span>
-                      <KbdGroup>
-                        <Kbd>Ctrl</Kbd>
-                        <Kbd>↵</Kbd>
-                      </KbdGroup>
-                    </div>
-                  </button>
-                  <button
-                    className="w-full flex flex-col gap-1 px-3 py-2 hover:bg-accent rounded-md transition-colors text-left"
-                    onClick={() => {
-                      setExecutionMode('all');
-                      handleExecute('all');
-                      setExecutionMenuOpen(false);
-                    }}
-                  >
-                    <span className="font-medium text-sm">Execute All Statements</span>
-                    <div className="flex items-center gap-1">
-                      <KbdGroup>
-                        <Kbd>⇧</Kbd>
-                        <Kbd>⌘</Kbd>
-                        <Kbd>↵</Kbd>
-                      </KbdGroup>
-                      <span className="text-xs text-muted-foreground">or</span>
-                      <KbdGroup>
-                        <Kbd>Ctrl</Kbd>
-                        <Kbd>Shift</Kbd>
-                        <Kbd>↵</Kbd>
-                      </KbdGroup>
-                    </div>
-                  </button>
-                  <div className="h-px bg-border my-1" />
-                  <button
-                    className="w-full flex flex-col px-3 py-2 hover:bg-accent rounded-md transition-colors text-left"
-                    onClick={() => {
-                      setExecutionMode(executionMode === 'current' ? 'all' : 'current');
-                      setExecutionMenuOpen(false);
-                    }}
-                  >
-                    <span className="font-medium text-sm">
-                      Default: {executionMode === 'current' ? 'Current Statement' : 'All Statements'}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      Click to toggle default mode
-                    </span>
-                  </button>
-                </div>
-              </PopoverContent>
-            </Popover>
-            </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                onClick={() => handleExecute()}
+                disabled={!activeConnection || !query.trim() || isExecuting}
+              >
+                {isExecuting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Executing...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 mr-2" />
+                    {executionLabel}
+                  </>
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <KbdGroup>
+                <Kbd>⌘</Kbd>
+                <Kbd>↵</Kbd>
+              </KbdGroup>
+              {' or '}
+              <KbdGroup>
+                <Kbd>Ctrl</Kbd>
+                <Kbd>↵</Kbd>
+              </KbdGroup>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
-      <div className="flex-1 p-4">
+      <div className="flex-1 p-4 safe-area-bottom">
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <div className="h-full">
@@ -417,6 +331,7 @@ export function QueryEditor() {
           isComplete={aiQueryGeneratedSql.length > 0}
           thinkingContent={aiQueryThinkingContent}
           error={aiQueryError}
+          hasSql={aiQueryGeneratedSql.length > 0}
         />
       )}
     </div>

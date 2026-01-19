@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use crate::db::query::QueryResult;
 
 /// Question type classification for routing and prompt selection
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -58,16 +57,6 @@ impl Message {
             tool_calls: None,
         }
     }
-
-    pub fn tool(content: impl Into<String>, tool_call_id: String) -> Self {
-        Self {
-            role: MessageRole::Tool,
-            content: content.into(),
-            timestamp: Utc::now(),
-            tool_call_id: Some(tool_call_id),
-            tool_calls: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,22 +66,6 @@ pub enum MessageRole {
     User,
     Assistant,
     Tool,
-}
-
-/// Result from tool execution
-#[derive(Debug, Clone)]
-pub struct ToolResult {
-    pub observation: String,
-    pub data: Option<QueryResult>,
-}
-
-/// Available tools for the agent
-#[derive(Debug, Clone)]
-pub enum Tool {
-    ExecuteSql {
-        query: String,
-        dry_run: bool,
-    },
 }
 
 /// Final response from the agent

@@ -2,6 +2,16 @@ use crate::db::connection::{ConnectionManager, DatabaseType};
 use crate::error::AppResult;
 use futures::future::join_all;
 
+/// Safely quote a PostgreSQL identifier (table name)
+fn quote_identifier_postgres(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+/// Safely quote a MySQL identifier (table name)
+fn quote_identifier_mysql(identifier: &str) -> String {
+    format!("`{}`", identifier.replace('`', "``"))
+}
+
 /// Clear all data from tables (TRUNCATE - keeps table structures)
 pub async fn clear_data_only(
     manager: &ConnectionManager,
@@ -47,7 +57,7 @@ async fn truncate_postgres_tables(
 
     let quoted_tables: Vec<String> = tables
         .iter()
-        .map(|t| format!("\"{}\"", t))
+        .map(|t| quote_identifier_postgres(t))
         .collect();
 
     let query = format!(
@@ -79,7 +89,7 @@ async fn drop_postgres_tables(
 
     let quoted_tables: Vec<String> = tables
         .iter()
-        .map(|t| format!("\"{}\"", t))
+        .map(|t| quote_identifier_postgres(t))
         .collect();
 
     let query = format!(
@@ -101,11 +111,9 @@ async fn truncate_mysql_tables(
     let conn_info = manager.get_connection(connection_id)?;
 
     let tables: Vec<String> = sqlx::query_scalar(
-        &format!(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = '{}'",
-            conn_info.default_database
-        )
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = ?"
     )
+    .bind(&conn_info.default_database)
     .fetch_all(&pool)
     .await?;
 
@@ -132,7 +140,8 @@ async fn truncate_mysql_tables(
                 .await?;
 
             for table in &tables_chunk {
-                sqlx::query(&format!("TRUNCATE TABLE `{}`", table))
+                let quoted_table = quote_identifier_mysql(table);
+                sqlx::query(&format!("TRUNCATE TABLE {}", quoted_table))
                     .execute(&mut *conn)
                     .await?;
             }
@@ -167,11 +176,9 @@ async fn drop_mysql_tables(
     let conn_info = manager.get_connection(connection_id)?;
 
     let tables: Vec<String> = sqlx::query_scalar(
-        &format!(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = '{}'",
-            conn_info.default_database
-        )
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = ?"
     )
+    .bind(&conn_info.default_database)
     .fetch_all(&pool)
     .await?;
 
@@ -192,7 +199,7 @@ async fn drop_mysql_tables(
     for chunk in tables.chunks(10) {
         let quoted_tables: Vec<String> = chunk
             .iter()
-            .map(|t| format!("`{}`", t))
+            .map(|t| quote_identifier_mysql(t))
             .collect();
 
         let query = format!("DROP TABLE IF EXISTS {}", quoted_tables.join(", "));

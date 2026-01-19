@@ -1,5 +1,6 @@
 import type { QueryResult } from "./query.types";
 import type { GeometryData } from "./geography.types";
+import type Plotly from "plotly.js";
 
 export type OpenRouterModel = {
   id: string;
@@ -45,6 +46,7 @@ export type ChatMessage = {
   id: string;
   role: ChatRole;
   content: string;
+  thinking?: string;
   timestamp: Date;
   mode?: AiMode;
   metadata?: {
@@ -58,6 +60,12 @@ export type ChatMessage = {
   chartData?: {
     config: VisualizationConfig;
     data: QueryResult;
+  };
+  plotlyChart?: {
+    plotlyData: Plotly.Data[];
+    plotlyLayout: Partial<Plotly.Layout>;
+    title: string;
+    chartType: string;
   };
   statisticData?: {
     value: number | string;
@@ -78,6 +86,15 @@ export type AiSession = {
   lastActivity: Date;
 };
 
+export type ConversationMetadata = {
+  session_id: string;
+  connection_id: string;
+  title: string;
+  message_count: number;
+  created_at: number; // Unix timestamp
+  updated_at: number; // Unix timestamp
+};
+
 export type AiGenerationResult = {
   content: string;
   isSafe: boolean;
@@ -93,6 +110,11 @@ export type StreamedResponse = {
 
 // Tauri Event Payloads
 export type AiTokenPayload = {
+  session_id: string;
+  content: string;
+};
+
+export type AiThinkingPayload = {
   session_id: string;
   content: string;
 };
@@ -119,6 +141,14 @@ export type AiMapDataPayload = {
   geometry: GeometryData;
   title?: string;
   description?: string;
+};
+
+export type AiPlotlyChartPayload = {
+  session_id: string;
+  plotly_data: Plotly.Data[];
+  plotly_layout: Partial<Plotly.Layout>;
+  title: string;
+  chart_type: string;
 };
 
 export type AiCompletePayload = {

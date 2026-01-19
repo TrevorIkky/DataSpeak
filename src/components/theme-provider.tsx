@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 type Theme = "dark" | "light" | "system";
 
@@ -42,10 +43,16 @@ export function ThemeProvider({
         : "light";
 
       root.classList.add(systemTheme);
+
+      // Sync Tauri window theme
+      updateTauriTheme(systemTheme);
       return;
     }
 
     root.classList.add(theme);
+
+    // Sync Tauri window theme
+    updateTauriTheme(theme);
   }, [theme]);
 
   const value = {
@@ -61,6 +68,17 @@ export function ThemeProvider({
       {children}
     </ThemeProviderContext.Provider>
   );
+}
+
+// Helper to update Tauri window theme
+async function updateTauriTheme(theme: "dark" | "light") {
+  try {
+    const appWindow = getCurrentWindow();
+    await appWindow.setTheme(theme);
+  } catch (error) {
+    // Not running in Tauri or API not available
+    console.debug("Tauri window theme API not available");
+  }
 }
 
 export const useTheme = () => {

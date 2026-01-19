@@ -8,6 +8,7 @@ import {
   type Suggestion,
 } from "@/lib/sqlAutocomplete";
 import { highlightSQL } from "@/lib/sqlSyntaxHighlight";
+import { useEditorStore } from "@/stores/editorStore";
 import type { Schema, SqlKeyword } from "@/types/database.types";
 
 interface SqlAutocompleteTextareaProps {
@@ -37,17 +38,36 @@ export const SqlAutocompleteTextarea = forwardRef<HTMLTextAreaElement, SqlAutoco
   onSelect: externalOnSelect,
   onClick: externalOnClick,
 }, ref) => {
+  // Zustand store
+  const {
+    interactionMode,
+    pastedRange,
+    showLineNumbers,
+    lineCount,
+    handlePaste,
+    handleTyping,
+    handleProgrammaticChange,
+    setPastedRange,
+    setLineCount
+  } = useEditorStore();
+
+  // Local state
   const [isOpen, setIsOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [highlightedHTML, setHighlightedHTML] = useState('');
+
+  // Refs
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
+  const pasteHighlightRef = useRef<HTMLDivElement>(null);
+  const lineNumbersRef = useRef<HTMLDivElement>(null);
   const hasTypedRef = useRef(false);
   const lastInsertedPositionRef = useRef<number | null>(null);
+  const lastValueLengthRef = useRef(0);
 
   // Expose the internal ref to the parent component
   useImperativeHandle(ref, () => textareaRef.current as HTMLTextAreaElement);
@@ -56,8 +76,13 @@ export const SqlAutocompleteTextarea = forwardRef<HTMLTextAreaElement, SqlAutoco
   useEffect(() => {
     if (!value) {
       setHighlightedHTML('');
+      setLineCount(1);
       return;
     }
+
+    // Calculate line count
+    const lines = value.split('\n').length;
+    setLineCount(lines);
 
     let cancelled = false;
 
@@ -71,6 +96,17 @@ export const SqlAutocompleteTextarea = forwardRef<HTMLTextAreaElement, SqlAutoco
       cancelled = true;
     };
   }, [value, keywords, schema]);
+
+  // Clear paste highlight after 2 seconds
+  useEffect(() => {
+    if (!pastedRange) return;
+
+    const timeout = setTimeout(() => {
+      setPastedRange(null);
+    }, 2000);
+
+    return () => clearTimeout(timeout);
+  }, [pastedRange]);
 
   // Update cursor position and calculate dropdown position
   useEffect(() => {
@@ -97,12 +133,52 @@ export const SqlAutocompleteTextarea = forwardRef<HTMLTextAreaElement, SqlAutoco
     return () => textarea.removeEventListener("scroll", handleScroll);
   }, [cursorPosition, isOpen]);
 
+  // Detect large changes (paste or programmatic updates)
+  useEffect(() => {
+    if (!value) {
+      lastValueLengthRef.current = 0;
+      return;
+    }
+
+    const lengthDiff = Math.abs(value.length - lastValueLengthRef.current);
+
+    // Large change detected - likely paste or programmatic update
+    if (lengthDiff > 5 && interactionMode !== 'pasting') {
+      handleProgrammaticChange();
+    }
+
+    lastValueLengthRef.current = value.length;
+  }, [value, interactionMode, handleProgrammaticChange]);
+
+  // Reset interaction mode to idle after paste or programmatic change
+  useEffect(() => {
+    if (interactionMode === 'pasting' || interactionMode === 'programmatic') {
+      // Wait for next user keypress to resume typing mode
+      const handleKeyPress = () => {
+        handleTyping();
+      };
+
+      const textarea = textareaRef.current;
+      textarea?.addEventListener('keypress', handleKeyPress, { once: true });
+
+      return () => {
+        textarea?.removeEventListener('keypress', handleKeyPress);
+      };
+    }
+  }, [interactionMode, handleTyping]);
+
   // Update suggestions when value or cursor position changes
   useEffect(() => {
     if (!textareaRef.current) return;
 
     // Don't show suggestions if nothing is typed
     if (!value.trim()) {
+      setIsOpen(false);
+      return;
+    }
+
+    // Only show autocomplete when user is actively typing
+    if (interactionMode !== 'typing' && interactionMode !== 'idle') {
       setIsOpen(false);
       return;
     }
@@ -133,7 +209,7 @@ export const SqlAutocompleteTextarea = forwardRef<HTMLTextAreaElement, SqlAutoco
     } else {
       setIsOpen(false);
     }
-  }, [value, cursorPosition, schema, keywords]);
+  }, [value, cursorPosition, schema, keywords, interactionMode]);
 
   // Scroll selected item into view
   useEffect(() => {
@@ -159,8 +235,30 @@ export const SqlAutocompleteTextarea = forwardRef<HTMLTextAreaElement, SqlAutoco
       onFirstKeystroke();
     }
 
+    // If mode is idle and user is changing text, they're typing
+    if (interactionMode === 'idle') {
+      const lengthDiff = Math.abs(newValue.length - value.length);
+      // Small changes are typing, large changes will be detected by the useEffect
+      if (lengthDiff <= 5) {
+        handleTyping();
+      }
+    }
+
     onChange(newValue);
     setCursorPosition(newCursorPos);
+  };
+
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pastedText = e.clipboardData.getData('text');
+    const textarea = e.currentTarget;
+    const start = textarea.selectionStart;
+    const end = start + pastedText.length;
+
+    // Use store action to handle paste
+    // Wait for next animation frame for paste to complete
+    requestAnimationFrame(() => {
+      handlePaste(start, end);
+    });
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -265,50 +363,104 @@ export const SqlAutocompleteTextarea = forwardRef<HTMLTextAreaElement, SqlAutoco
     }
   };
 
-  // Sync scroll between textarea and highlight overlay
+  // Render paste highlight overlay
+  const renderPasteHighlight = () => {
+    if (!pastedRange || !textareaRef.current) return null;
+
+    const beforeText = value.substring(0, pastedRange.start);
+    const pastedText = value.substring(pastedRange.start, pastedRange.end);
+
+    // Create invisible content before the pasted text to position it correctly
+    return (
+      <div
+        ref={pasteHighlightRef}
+        className="absolute inset-0 overflow-hidden pointer-events-none whitespace-pre-wrap break-words px-2 sm:px-3 py-2 text-xs sm:text-sm font-mono"
+        style={{ zIndex: 5 }}
+      >
+        <span style={{ opacity: 0 }}>{beforeText}</span>
+        <span className="sql-paste-flash inline">{pastedText}</span>
+      </div>
+    );
+  };
+
+  // Sync scroll between textarea and highlight overlays
   const handleScroll = () => {
-    if (textareaRef.current && highlightRef.current) {
-      highlightRef.current.scrollTop = textareaRef.current.scrollTop;
-      highlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
+    if (textareaRef.current) {
+      if (highlightRef.current) {
+        highlightRef.current.scrollTop = textareaRef.current.scrollTop;
+        highlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
+      }
+      if (pasteHighlightRef.current) {
+        pasteHighlightRef.current.scrollTop = textareaRef.current.scrollTop;
+        pasteHighlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
+      }
+      if (lineNumbersRef.current) {
+        lineNumbersRef.current.scrollTop = textareaRef.current.scrollTop;
+      }
     }
   };
 
   return (
-    <div className="relative w-full h-full">
-      {/* Syntax highlighting overlay */}
-      <div
-        ref={highlightRef}
-        className="absolute inset-0 overflow-hidden pointer-events-none whitespace-pre-wrap break-words px-3 py-2 text-base md:text-sm font-mono"
-        dangerouslySetInnerHTML={{ __html: highlightedHTML }}
-      />
+    <div className="relative w-full h-full flex">
+      {/* Line numbers */}
+      {showLineNumbers && (
+        <div
+          ref={lineNumbersRef}
+          className="flex-shrink-0 overflow-hidden select-none pointer-events-none py-2 pr-2 pl-1 text-xs sm:text-sm font-mono text-muted-foreground/50 border-r border-border/40"
+          style={{
+            width: `${Math.max(String(lineCount).length * 8 + 12, 32)}px`,
+            minWidth: '32px'
+          }}
+        >
+          {Array.from({ length: lineCount }, (_, i) => (
+            <div key={i + 1} className="leading-[1.5] text-center">
+              {i + 1}
+            </div>
+          ))}
+        </div>
+      )}
 
-      {/* Textarea with transparent text */}
-      <Textarea
-        ref={textareaRef}
-        value={value}
-        onChange={handleTextareaChange}
-        onKeyDown={handleKeyDown}
-        onClick={handleClick}
-        onSelect={handleSelect}
-        onScroll={handleScroll}
-        onBlur={() => {
-          // Delay closing to allow click on suggestion
-          setTimeout(() => setIsOpen(false), 200);
-        }}
-        placeholder={placeholder}
-        disabled={disabled}
-        className={`${className} relative z-10 bg-transparent caret-foreground`}
-        style={{
-          color: 'transparent',
-          WebkitTextFillColor: 'transparent',
-        }}
-        spellCheck={false}
-      />
+      {/* Editor area */}
+      <div className="relative flex-1 h-full">
+        {/* Syntax highlighting overlay */}
+        <div
+          ref={highlightRef}
+          className="absolute inset-0 overflow-hidden pointer-events-none whitespace-pre-wrap break-words px-2 sm:px-3 py-2 text-xs sm:text-sm font-mono"
+          dangerouslySetInnerHTML={{ __html: highlightedHTML }}
+        />
+
+        {/* Paste highlight overlay */}
+        {renderPasteHighlight()}
+
+        {/* Textarea with transparent text */}
+        <Textarea
+          ref={textareaRef}
+          value={value}
+          onChange={handleTextareaChange}
+          onKeyDown={handleKeyDown}
+          onClick={handleClick}
+          onSelect={handleSelect}
+          onScroll={handleScroll}
+          onPaste={onPaste}
+          onBlur={() => {
+            // Delay closing to allow click on suggestion
+            setTimeout(() => setIsOpen(false), 200);
+          }}
+          placeholder={placeholder}
+          disabled={disabled}
+          className={`${className} relative z-10 bg-transparent caret-foreground rounded-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 outline-none`}
+          style={{
+            color: 'transparent',
+            WebkitTextFillColor: 'transparent',
+          }}
+          spellCheck={false}
+        />
+      </div>
 
       {isOpen && suggestions.length > 0 && (
         <div
           ref={dropdownRef}
-          className="absolute z-50 w-[350px] max-h-[280px] overflow-y-auto rounded-md border bg-popover shadow-md"
+          className="absolute z-50 w-[280px] sm:w-[350px] max-h-[240px] sm:max-h-[280px] overflow-y-auto rounded-md border bg-popover shadow-md"
           style={{
             top: `${position.top}px`,
             left: `${position.left}px`,
@@ -321,7 +473,7 @@ export const SqlAutocompleteTextarea = forwardRef<HTMLTextAreaElement, SqlAutoco
                 key={`${suggestion.category}-${suggestion.label}-${index}`}
                 data-index={index}
                 onClick={() => insertSelectedSuggestion(suggestion)}
-                className={`px-2 py-1.5 cursor-pointer text-sm rounded-sm transition-colors ${
+                className={`px-2 py-1.5 cursor-pointer text-xs sm:text-sm rounded-sm transition-colors ${
                   index === selectedIndex
                     ? "bg-accent text-accent-foreground"
                     : "hover:bg-accent/50"
@@ -332,12 +484,12 @@ export const SqlAutocompleteTextarea = forwardRef<HTMLTextAreaElement, SqlAutoco
                     <span className="text-xs flex-shrink-0 opacity-60">
                       {getCategoryIcon(suggestion.category)}
                     </span>
-                    <span className="font-mono text-sm truncate">
+                    <span className="font-mono text-xs sm:text-sm truncate">
                       {suggestion.label}
                     </span>
                   </div>
                   {suggestion.description && (
-                    <span className="text-xs text-muted-foreground flex-shrink-0 font-mono">
+                    <span className="text-xs text-muted-foreground flex-shrink-0 font-mono hidden sm:inline">
                       {suggestion.description}
                     </span>
                   )}

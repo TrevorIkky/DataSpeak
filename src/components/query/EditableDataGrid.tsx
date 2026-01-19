@@ -733,13 +733,71 @@ export function EditableDataGrid({
         );
       }
 
-      // Check for hex binary data
-      if (displayValue.startsWith("0x")) {
+      // Check for hex binary data (BYTEA, BLOB)
+      if (displayValue.startsWith("0x") || displayValue.startsWith("\\x")) {
         const displayText =
           displayValue.length > 50 ? displayValue.substring(0, 50) + "..." : displayValue;
         return withForeignKeyIcon(
           <span className="font-mono text-orange-700 dark:text-orange-400 text-xs whitespace-nowrap" title={displayValue}>
             {displayText}
+          </span>
+        );
+      }
+
+      // Check for PostgreSQL bit strings (b'10101')
+      if (/^b'[01]+'$/.test(displayValue)) {
+        return withForeignKeyIcon(
+          <span className="font-mono text-orange-600 dark:text-orange-300 text-xs whitespace-nowrap" title={displayValue}>
+            {displayValue}
+          </span>
+        );
+      }
+
+      // Check for NaN/Infinity special float values
+      if (displayValue === "NaN" || displayValue === "Infinity" || displayValue === "-Infinity") {
+        return withForeignKeyIcon(
+          <span className="font-mono text-yellow-700 dark:text-yellow-400 italic whitespace-nowrap" title={displayValue}>
+            {displayValue}
+          </span>
+        );
+      }
+
+      // Check for IP address / CIDR notation (INET, CIDR types)
+      const ipPattern = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$|^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}(\/\d{1,3})?$/;
+      if (ipPattern.test(displayValue)) {
+        return withForeignKeyIcon(
+          <span className="font-mono text-teal-700 dark:text-teal-400 text-sm whitespace-nowrap" title={displayValue}>
+            {displayValue}
+          </span>
+        );
+      }
+
+      // Check for MAC address pattern
+      const macPattern = /^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/;
+      if (macPattern.test(displayValue)) {
+        return withForeignKeyIcon(
+          <span className="font-mono text-teal-600 dark:text-teal-300 text-sm whitespace-nowrap" title={displayValue}>
+            {displayValue}
+          </span>
+        );
+      }
+
+      // Check for PostgreSQL range types [x,y) or (x,y] etc.
+      const rangePattern = /^[\[\(].+,.+[\]\)]$/;
+      if (rangePattern.test(displayValue)) {
+        return withForeignKeyIcon(
+          <span className="font-mono text-violet-700 dark:text-violet-400 text-sm whitespace-nowrap" title={displayValue}>
+            {displayValue}
+          </span>
+        );
+      }
+
+      // Check for PostgreSQL interval format (includes months/days or HH:MM:SS)
+      const intervalPattern = /^\d+\s+months?\s+\d+\s+days?\s+\d{2}:\d{2}:\d{2}|^\d{2}:\d{2}:\d{2}\.\d+$/;
+      if (intervalPattern.test(displayValue)) {
+        return withForeignKeyIcon(
+          <span className="font-mono text-amber-700 dark:text-amber-400 text-sm whitespace-nowrap" title={displayValue}>
+            {displayValue}
           </span>
         );
       }
@@ -762,15 +820,23 @@ export function EditableDataGrid({
       );
     }
 
-    // Handle object (like JSON)
+    // Handle object (like JSON) or array
     if (typeof displayValue === "object") {
+      const isArray = Array.isArray(displayValue);
       const jsonStr = JSON.stringify(displayValue);
+      const displayStr = jsonStr.length > 100 ? jsonStr.substring(0, 100) + "..." : jsonStr;
+
+      // Arrays get a different color (pink/rose) to distinguish from objects (indigo)
+      const colorClass = isArray
+        ? "text-rose-700 dark:text-rose-400"
+        : "text-indigo-700 dark:text-indigo-400";
+
       return withForeignKeyIcon(
         <span
-          className="font-mono text-sm text-indigo-700 dark:text-indigo-400 block truncate max-w-[300px] whitespace-nowrap"
+          className={`font-mono text-sm ${colorClass} block truncate max-w-[300px] whitespace-nowrap`}
           title={jsonStr}
         >
-          {jsonStr}
+          {displayStr}
         </span>
       );
     }
@@ -789,18 +855,32 @@ export function EditableDataGrid({
       // Checkbox column for row selection
       {
         id: "select",
-        header: ({ table }) => (
-          <div className="flex items-center justify-center">
-            {displayData.length > 0 && (
+        header: ({ table }) => {
+          const pageRows = table.getRowModel().rows;
+          const pageRowIndices = pageRows.map((row) => getOriginalIndex(row.index));
+          const allSelected = pageRowIndices.length > 0 && pageRowIndices.every((idx) => selectedRows.has(idx));
+
+          const toggleAll = () => {
+            const newSelection = new Set(selectedRows);
+            if (allSelected) {
+              pageRowIndices.forEach((idx) => newSelection.delete(idx));
+            } else {
+              pageRowIndices.forEach((idx) => newSelection.add(idx));
+            }
+            setSelectedRows(newSelection);
+          };
+
+          return (
+            <div className="flex items-center justify-center py-2">
               <input
                 type="checkbox"
-                checked={table.getIsAllPageRowsSelected()}
-                onChange={table.getToggleAllPageRowsSelectedHandler()}
+                checked={allSelected}
+                onChange={toggleAll}
                 className="h-4 w-4 rounded border-gray-300"
               />
-            )}
-          </div>
-        ),
+            </div>
+          );
+        },
         cell: ({ row }) => {
           const originalIndex = getOriginalIndex(row.index);
           const isDeleted = isRowDeleted(originalIndex);
@@ -926,8 +1006,10 @@ export function EditableDataGrid({
                           editingColumnMetadata?.data_type === "BOOLEAN" ||
                           editingColumnMetadata?.data_type === "TINYINT(1)";
 
-  const isEnumColumn = editingColumnMetadata?.data_type === "ENUM" &&
-                       editingColumnMetadata?.enum_values &&
+  // Enum detection: Check if enum_values are populated (works for both PostgreSQL custom enums and MySQL ENUM/SET)
+  // PostgreSQL enums have the custom type name as data_type, not "ENUM"
+  // MySQL has "ENUM" or "SET" as data_type
+  const isEnumColumn = editingColumnMetadata?.enum_values &&
                        editingColumnMetadata.enum_values.length > 0;
 
   return (
@@ -968,16 +1050,13 @@ export function EditableDataGrid({
             </Select>
           ) : isEnumColumn ? (
             <Select
-              value={editValue || "null"}
+              value={editValue || editingColumnMetadata?.enum_values?.[0] || "null"}
               onValueChange={(value) => {
                 setEditValue(value);
-                // Auto-save on selection
                 setTimeout(() => saveEdit(), 0);
               }}
               onOpenChange={(open) => {
-                if (!open) {
-                  saveEdit();
-                }
+                if (!open) saveEdit();
               }}
             >
               <SelectTrigger className="h-full text-sm w-full border-2 border-blue-500" autoFocus>
@@ -1057,9 +1136,9 @@ export function EditableDataGrid({
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-auto relative" ref={scrollContainerRef}>
+      <div className="flex-1 overflow-auto relative data-grid-mobile" ref={scrollContainerRef}>
         <Table>
-          <TableHeader className="sticky top-0 bg-card z-10 shadow-sm">
+          <TableHeader className="shadow-sm">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
@@ -1078,13 +1157,16 @@ export function EditableDataGrid({
                 const originalIndex = getOriginalIndex(row.index);
                 const isDeleted = isRowDeleted(originalIndex);
                 const isNew = isRowInserted(originalIndex);
+                const isSelected = selectedRows.has(originalIndex);
 
                 return (
                   <TableRow
                     key={row.id}
-                    data-state={row.getIsSelected() && "selected"}
+                    data-state={isSelected ? "selected" : undefined}
                     className={cn(
+                      "transition-colors duration-150",
                       "hover:bg-muted/50",
+                      isSelected && "bg-muted/50",
                       isDeleted && "line-through opacity-60 bg-red-50 dark:bg-red-950/20",
                       isNew && "bg-green-100 dark:bg-green-900/40"
                     )}
@@ -1111,36 +1193,39 @@ export function EditableDataGrid({
       </div>
 
       {/* Table Actions - Above Pagination */}
-      <div className="flex items-center justify-between px-4 py-2 border-t bg-card/50">
+      <div className={`flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 px-4 py-2 border-t bg-card/50 ${displayData.length === 0 ? 'safe-area-bottom' : ''}`}>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={addRow} className="h-8">
+          <Button size="sm" variant="outline" onClick={addRow} className="h-9 md:h-8">
             <Plus className="h-4 w-4 mr-2" />
-            Add Row
+            <span className="hidden sm:inline">Add Row</span>
+            <span className="sm:hidden">Add</span>
           </Button>
           {selectedRows.size > 0 && (
             <Button
               size="sm"
               variant="outline"
               onClick={deleteSelectedRows}
-              className="h-8 text-destructive hover:text-destructive/80"
+              className="h-9 md:h-8 text-destructive hover:text-destructive/80"
             >
               <Trash2 className="h-4 w-4 mr-2" />
-              Delete Selected ({selectedRows.size})
+              <span className="hidden sm:inline">Delete Selected</span>
+              <span className="sm:hidden">Delete</span>
+              ({selectedRows.size})
             </Button>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 justify-end">
           {hasChanges && (
             <>
-              <Button size="sm" variant="outline" onClick={resetChanges} className="h-8">
+              <Button size="sm" variant="outline" onClick={resetChanges} className="h-9 md:h-8">
                 <RotateCcw className="h-4 w-4 mr-2" />
                 Reset
               </Button>
               <Button
                 size="sm"
                 onClick={handleCommit}
-                className="h-8"
+                className="h-9 md:h-8"
                 disabled={!canCommit}
                 title={!canCommit ? "Commits are only supported for tables with primary keys" : undefined}
               >
@@ -1154,23 +1239,25 @@ export function EditableDataGrid({
 
       {/* Pagination - Only show if there's data */}
       {displayData.length > 0 && (
-        <div className="flex items-center justify-between px-4 py-3 border-t bg-card">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-2 px-4 py-3 border-t bg-card safe-area-bottom">
+          {/* Page info - hidden on small mobile */}
+          <div className="hidden sm:flex items-center gap-2">
             <p className="text-sm text-muted-foreground">
               Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
             </p>
           </div>
 
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2 md:gap-6 w-full md:w-auto justify-between md:justify-end">
+            {/* Rows per page - compact on mobile */}
             <div className="flex items-center gap-2">
-              <p className="text-sm text-muted-foreground whitespace-nowrap">Rows per page</p>
+              <p className="text-xs md:text-sm text-muted-foreground whitespace-nowrap hidden sm:block">Rows per page</p>
               <Select
                 value={`${table.getState().pagination.pageSize}`}
                 onValueChange={(value) => {
                   table.setPageSize(Number(value));
                 }}
               >
-                <SelectTrigger className="h-8 w-[70px]">
+                <SelectTrigger className="h-9 w-[70px] md:h-8">
                   <SelectValue placeholder={table.getState().pagination.pageSize} />
                 </SelectTrigger>
                 <SelectContent side="top">
@@ -1183,11 +1270,12 @@ export function EditableDataGrid({
               </Select>
             </div>
 
+            {/* Navigation buttons - touch-friendly */}
             <div className="flex items-center gap-1">
               <Button
                 variant="outline"
                 size="icon"
-                className="h-8 w-8"
+                className="h-9 w-9 md:h-8 md:w-8"
                 onClick={() => table.firstPage()}
                 disabled={!table.getCanPreviousPage()}
               >
@@ -1196,7 +1284,7 @@ export function EditableDataGrid({
               <Button
                 variant="outline"
                 size="icon"
-                className="h-8 w-8"
+                className="h-9 w-9 md:h-8 md:w-8"
                 onClick={() => table.previousPage()}
                 disabled={!table.getCanPreviousPage()}
               >
@@ -1205,7 +1293,7 @@ export function EditableDataGrid({
               <Button
                 variant="outline"
                 size="icon"
-                className="h-8 w-8"
+                className="h-9 w-9 md:h-8 md:w-8"
                 onClick={() => table.nextPage()}
                 disabled={!table.getCanNextPage()}
               >
@@ -1214,7 +1302,7 @@ export function EditableDataGrid({
               <Button
                 variant="outline"
                 size="icon"
-                className="h-8 w-8"
+                className="h-9 w-9 md:h-8 md:w-8"
                 onClick={() => table.lastPage()}
                 disabled={!table.getCanNextPage()}
               >

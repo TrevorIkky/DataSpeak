@@ -26,6 +26,10 @@ export const useUIStore = create<IUIStore>((set) => ({
   aiQueryThinkingContent: "",
   aiQueryError: null,
   isAiQueryGenerating: false,
+  // Mobile view states
+  mobileQueryView: 'editor',
+  mobileMapView: 'grid',
+  mobileChartView: 'grid',
 
   toggleSidebar: () => {
     set((state) => ({ sidebarOpen: !state.sidebarOpen }));
@@ -135,5 +139,17 @@ export const useUIStore = create<IUIStore>((set) => ({
       isAiQueryGenerating: false,
       aiQueryError: error,
     });
+  },
+
+  setMobileQueryView: (view) => {
+    set({ mobileQueryView: view });
+  },
+
+  setMobileMapView: (view) => {
+    set({ mobileMapView: view });
+  },
+
+  setMobileChartView: (view) => {
+    set({ mobileChartView: view });
   },
 }));

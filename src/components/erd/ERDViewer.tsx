@@ -402,7 +402,7 @@ function ERDViewerInner({ tables, focusTableName }: ERDViewerProps) {
       </div>
 
       {/* Legend and Info */}
-      <div className="px-4 py-2 border-t bg-card">
+      <div className="px-4 py-2 border-t bg-card safe-area-bottom">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-6 text-xs text-muted-foreground">
             <div className="flex items-center gap-2">

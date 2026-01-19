@@ -1,6 +1,7 @@
 use crate::db::connection::{ConnectionManager, DatabaseType};
 use crate::error::AppResult;
 use serde::{Deserialize, Serialize};
+use sqlx::QueryBuilder;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CellEdit {
@@ -63,18 +64,21 @@ async fn commit_postgres_changes(
     let mut edits_count = 0;
     let mut deletes_count = 0;
     let mut inserts_count = 0;
+    let quoted_table = quote_identifier_postgres(&request.table_name);
 
     // Process deletes first
     for row_index in &request.changes.deletes {
         if let Some(row_data) = request.original_rows.get(*row_index) {
-            let where_clause = build_where_clause_postgres(&request.primary_key_columns, row_data);
-            let delete_query = format!(
-                "DELETE FROM {} WHERE {}",
-                quote_identifier_postgres(&request.table_name),
-                where_clause
+            let mut query_builder: QueryBuilder<sqlx::Postgres> =
+                QueryBuilder::new(format!("DELETE FROM {} WHERE ", quoted_table));
+
+            build_where_clause_with_binds_postgres(
+                &mut query_builder,
+                &request.primary_key_columns,
+                row_data,
             );
 
-            sqlx::query(&delete_query).execute(&mut *tx).await?;
+            query_builder.build().execute(&mut *tx).await?;
             deletes_count += 1;
         }
     }
@@ -89,47 +93,62 @@ async fn commit_postgres_changes(
 
     for (row_index, row_edits) in edits_by_row {
         if let Some(row_data) = request.original_rows.get(row_index) {
-            let set_clause = row_edits
-                .iter()
-                .map(|edit| {
-                    let value_str = json_value_to_sql_string_postgres(&edit.new_value);
-                    format!("{} = {}", quote_identifier_postgres(&edit.column_name), value_str)
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
+            let mut query_builder: QueryBuilder<sqlx::Postgres> =
+                QueryBuilder::new(format!("UPDATE {} SET ", quoted_table));
 
-            let where_clause = build_where_clause_postgres(&request.primary_key_columns, row_data);
+            // Build SET clause with bind parameters
+            let mut first = true;
+            for edit in &row_edits {
+                if !first {
+                    query_builder.push(", ");
+                }
+                first = false;
 
-            let update_query = format!(
-                "UPDATE {} SET {} WHERE {}",
-                quote_identifier_postgres(&request.table_name),
-                set_clause,
-                where_clause
+                query_builder.push(quote_identifier_postgres(&edit.column_name));
+                query_builder.push(" = ");
+                push_json_value_postgres(&mut query_builder, &edit.new_value);
+            }
+
+            query_builder.push(" WHERE ");
+            build_where_clause_with_binds_postgres(
+                &mut query_builder,
+                &request.primary_key_columns,
+                row_data,
             );
 
-            sqlx::query(&update_query).execute(&mut *tx).await?;
+            query_builder.build().execute(&mut *tx).await?;
             edits_count += row_edits.len();
         }
     }
 
     // Process inserts
     for insert in &request.changes.inserts {
+        if insert.row_data.is_empty() {
+            continue;
+        }
+
+        let mut query_builder: QueryBuilder<sqlx::Postgres> =
+            QueryBuilder::new(format!("INSERT INTO {} (", quoted_table));
+
+        // Build column list
         let columns: Vec<String> = insert.row_data.keys()
             .map(|k| quote_identifier_postgres(k))
             .collect();
+        query_builder.push(columns.join(", "));
+        query_builder.push(") VALUES (");
 
-        let values: Vec<String> = insert.row_data.values()
-            .map(json_value_to_sql_string_postgres)
-            .collect();
+        // Build values with bind parameters
+        let mut first = true;
+        for value in insert.row_data.values() {
+            if !first {
+                query_builder.push(", ");
+            }
+            first = false;
+            push_json_value_postgres(&mut query_builder, value);
+        }
+        query_builder.push(")");
 
-        let insert_query = format!(
-            "INSERT INTO {} ({}) VALUES ({})",
-            quote_identifier_postgres(&request.table_name),
-            columns.join(", "),
-            values.join(", ")
-        );
-
-        sqlx::query(&insert_query).execute(&mut *tx).await?;
+        query_builder.build().execute(&mut *tx).await?;
         inserts_count += 1;
     }
 
@@ -157,18 +176,21 @@ async fn commit_mysql_changes(
     let mut edits_count = 0;
     let mut deletes_count = 0;
     let mut inserts_count = 0;
+    let quoted_table = quote_identifier_mysql(&request.table_name);
 
     // Process deletes first
     for row_index in &request.changes.deletes {
         if let Some(row_data) = request.original_rows.get(*row_index) {
-            let where_clause = build_where_clause_mysql(&request.primary_key_columns, row_data);
-            let delete_query = format!(
-                "DELETE FROM {} WHERE {}",
-                quote_identifier_mysql(&request.table_name),
-                where_clause
+            let mut query_builder: QueryBuilder<sqlx::MySql> =
+                QueryBuilder::new(format!("DELETE FROM {} WHERE ", quoted_table));
+
+            build_where_clause_with_binds_mysql(
+                &mut query_builder,
+                &request.primary_key_columns,
+                row_data,
             );
 
-            sqlx::query(&delete_query).execute(&mut *tx).await?;
+            query_builder.build().execute(&mut *tx).await?;
             deletes_count += 1;
         }
     }
@@ -183,47 +205,62 @@ async fn commit_mysql_changes(
 
     for (row_index, row_edits) in edits_by_row {
         if let Some(row_data) = request.original_rows.get(row_index) {
-            let set_clause = row_edits
-                .iter()
-                .map(|edit| {
-                    let value_str = json_value_to_sql_string_mysql(&edit.new_value);
-                    format!("{} = {}", quote_identifier_mysql(&edit.column_name), value_str)
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
+            let mut query_builder: QueryBuilder<sqlx::MySql> =
+                QueryBuilder::new(format!("UPDATE {} SET ", quoted_table));
 
-            let where_clause = build_where_clause_mysql(&request.primary_key_columns, row_data);
+            // Build SET clause with bind parameters
+            let mut first = true;
+            for edit in &row_edits {
+                if !first {
+                    query_builder.push(", ");
+                }
+                first = false;
 
-            let update_query = format!(
-                "UPDATE {} SET {} WHERE {}",
-                quote_identifier_mysql(&request.table_name),
-                set_clause,
-                where_clause
+                query_builder.push(quote_identifier_mysql(&edit.column_name));
+                query_builder.push(" = ");
+                push_json_value_mysql(&mut query_builder, &edit.new_value);
+            }
+
+            query_builder.push(" WHERE ");
+            build_where_clause_with_binds_mysql(
+                &mut query_builder,
+                &request.primary_key_columns,
+                row_data,
             );
 
-            sqlx::query(&update_query).execute(&mut *tx).await?;
+            query_builder.build().execute(&mut *tx).await?;
             edits_count += row_edits.len();
         }
     }
 
     // Process inserts
     for insert in &request.changes.inserts {
+        if insert.row_data.is_empty() {
+            continue;
+        }
+
+        let mut query_builder: QueryBuilder<sqlx::MySql> =
+            QueryBuilder::new(format!("INSERT INTO {} (", quoted_table));
+
+        // Build column list
         let columns: Vec<String> = insert.row_data.keys()
             .map(|k| quote_identifier_mysql(k))
             .collect();
+        query_builder.push(columns.join(", "));
+        query_builder.push(") VALUES (");
 
-        let values: Vec<String> = insert.row_data.values()
-            .map(json_value_to_sql_string_mysql)
-            .collect();
+        // Build values with bind parameters
+        let mut first = true;
+        for value in insert.row_data.values() {
+            if !first {
+                query_builder.push(", ");
+            }
+            first = false;
+            push_json_value_mysql(&mut query_builder, value);
+        }
+        query_builder.push(")");
 
-        let insert_query = format!(
-            "INSERT INTO {} ({}) VALUES ({})",
-            quote_identifier_mysql(&request.table_name),
-            columns.join(", "),
-            values.join(", ")
-        );
-
-        sqlx::query(&insert_query).execute(&mut *tx).await?;
+        query_builder.build().execute(&mut *tx).await?;
         inserts_count += 1;
     }
 
@@ -243,64 +280,118 @@ async fn commit_mysql_changes(
 
 // Helper functions for PostgreSQL
 fn quote_identifier_postgres(identifier: &str) -> String {
-    format!("\"{}\"", identifier.replace("\"", "\"\""))
+    format!("\"{}\"", identifier.replace('"', "\"\""))
 }
 
-fn build_where_clause_postgres(
+/// Build WHERE clause with proper NULL handling using bind parameters
+fn build_where_clause_with_binds_postgres(
+    query_builder: &mut QueryBuilder<sqlx::Postgres>,
     primary_keys: &[String],
     row_data: &serde_json::Map<String, serde_json::Value>,
-) -> String {
-    primary_keys
-        .iter()
-        .map(|pk| {
-            let value = row_data.get(pk).unwrap_or(&serde_json::Value::Null);
-            let value_str = json_value_to_sql_string_postgres(value);
-            format!("{} = {}", quote_identifier_postgres(pk), value_str)
-        })
-        .collect::<Vec<_>>()
-        .join(" AND ")
+) {
+    let mut first = true;
+    for pk in primary_keys {
+        if !first {
+            query_builder.push(" AND ");
+        }
+        first = false;
+
+        let value = row_data.get(pk).unwrap_or(&serde_json::Value::Null);
+        query_builder.push(quote_identifier_postgres(pk));
+
+        // Use IS NULL for null values (NULL = NULL is never true in SQL!)
+        if value.is_null() {
+            query_builder.push(" IS NULL");
+        } else {
+            query_builder.push(" = ");
+            push_json_value_postgres(query_builder, value);
+        }
+    }
 }
 
-fn json_value_to_sql_string_postgres(value: &serde_json::Value) -> String {
+/// Push a JSON value as a bind parameter for PostgreSQL
+fn push_json_value_postgres(query_builder: &mut QueryBuilder<sqlx::Postgres>, value: &serde_json::Value) {
     match value {
-        serde_json::Value::Null => "NULL".to_string(),
-        serde_json::Value::Bool(b) => b.to_string().to_uppercase(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => format!("'{}'", s.replace("'", "''")),
+        serde_json::Value::Null => {
+            query_builder.push("NULL");
+        }
+        serde_json::Value::Bool(b) => {
+            query_builder.push_bind(*b);
+        }
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                query_builder.push_bind(i);
+            } else if let Some(f) = n.as_f64() {
+                query_builder.push_bind(f);
+            } else {
+                query_builder.push_bind(n.to_string());
+            }
+        }
+        serde_json::Value::String(s) => {
+            query_builder.push_bind(s.clone());
+        }
         serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-            format!("'{}'", serde_json::to_string(value).unwrap_or_default().replace("'", "''"))
+            // For JSON arrays/objects, bind as JSON string
+            query_builder.push_bind(serde_json::to_string(value).unwrap_or_default());
         }
     }
 }
 
 // Helper functions for MySQL
 fn quote_identifier_mysql(identifier: &str) -> String {
-    format!("`{}`", identifier.replace("`", "``"))
+    format!("`{}`", identifier.replace('`', "``"))
 }
 
-fn build_where_clause_mysql(
+/// Build WHERE clause with proper NULL handling using bind parameters
+fn build_where_clause_with_binds_mysql(
+    query_builder: &mut QueryBuilder<sqlx::MySql>,
     primary_keys: &[String],
     row_data: &serde_json::Map<String, serde_json::Value>,
-) -> String {
-    primary_keys
-        .iter()
-        .map(|pk| {
-            let value = row_data.get(pk).unwrap_or(&serde_json::Value::Null);
-            let value_str = json_value_to_sql_string_mysql(value);
-            format!("{} = {}", quote_identifier_mysql(pk), value_str)
-        })
-        .collect::<Vec<_>>()
-        .join(" AND ")
+) {
+    let mut first = true;
+    for pk in primary_keys {
+        if !first {
+            query_builder.push(" AND ");
+        }
+        first = false;
+
+        let value = row_data.get(pk).unwrap_or(&serde_json::Value::Null);
+        query_builder.push(quote_identifier_mysql(pk));
+
+        // Use IS NULL for null values
+        if value.is_null() {
+            query_builder.push(" IS NULL");
+        } else {
+            query_builder.push(" = ");
+            push_json_value_mysql(query_builder, value);
+        }
+    }
 }
 
-fn json_value_to_sql_string_mysql(value: &serde_json::Value) -> String {
+/// Push a JSON value as a bind parameter for MySQL
+fn push_json_value_mysql(query_builder: &mut QueryBuilder<sqlx::MySql>, value: &serde_json::Value) {
     match value {
-        serde_json::Value::Null => "NULL".to_string(),
-        serde_json::Value::Bool(b) => if *b { "1" } else { "0" }.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => format!("'{}'", s.replace("\\", "\\\\").replace("'", "\\'")),
+        serde_json::Value::Null => {
+            query_builder.push("NULL");
+        }
+        serde_json::Value::Bool(b) => {
+            // MySQL uses 1/0 for boolean
+            query_builder.push_bind(if *b { 1i32 } else { 0i32 });
+        }
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                query_builder.push_bind(i);
+            } else if let Some(f) = n.as_f64() {
+                query_builder.push_bind(f);
+            } else {
+                query_builder.push_bind(n.to_string());
+            }
+        }
+        serde_json::Value::String(s) => {
+            query_builder.push_bind(s.clone());
+        }
         serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-            format!("'{}'", serde_json::to_string(value).unwrap_or_default().replace("\\", "\\\\").replace("'", "\\'"))
+            query_builder.push_bind(serde_json::to_string(value).unwrap_or_default());
         }
     }
 }

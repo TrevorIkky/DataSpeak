@@ -261,7 +261,7 @@ export function MapViewer({
       </div>
 
       {/* Attribution */}
-      <div className="px-4 py-2 border-t bg-muted/30">
+      <div className="px-4 py-2 border-t bg-muted/30 safe-area-bottom">
         <p className="text-xs text-muted-foreground text-center">
           Map data © OpenStreetMap contributors
         </p>

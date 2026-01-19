@@ -13,6 +13,20 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
+/// NULL marker for CSV export (PostgreSQL COPY convention)
+/// This distinguishes NULL values from empty strings during import/export round-trips
+pub const CSV_NULL_MARKER: &str = "\\N";
+
+/// Safely quote a PostgreSQL identifier (table/column name)
+fn quote_identifier_postgres(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+/// Safely quote a MySQL identifier (table/column name)
+fn quote_identifier_mysql(identifier: &str) -> String {
+    format!("`{}`", identifier.replace('`', "``"))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportProgress {
     pub table_name: String,
@@ -289,18 +303,16 @@ async fn export_postgres_table(
 ) -> AppResult<()> {
     let pool = manager.get_pool_postgres(connection_id).await?;
 
-    // First, query column metadata to get types
-    let type_query = format!(
+    // First, query column metadata to get types (using parameterized query)
+    let column_metadata: Vec<(String, String, String)> = sqlx::query_as(
         "SELECT column_name, udt_name, data_type
          FROM information_schema.columns
-         WHERE table_name = '{}' AND table_schema = 'public'
-         ORDER BY ordinal_position",
-        table_name
-    );
-
-    let column_metadata: Vec<(String, String, String)> = sqlx::query_as(&type_query)
-        .fetch_all(&pool)
-        .await?;
+         WHERE table_name = $1 AND table_schema = 'public'
+         ORDER BY ordinal_position"
+    )
+    .bind(table_name)
+    .fetch_all(&pool)
+    .await?;
 
     if column_metadata.is_empty() {
         return Err(AppError::DatabaseError(format!("Table '{}' not found or has no columns", table_name)));
@@ -310,17 +322,18 @@ async fn export_postgres_table(
     let select_parts: Vec<String> = column_metadata
         .iter()
         .map(|(column_name, udt_name, _)| {
+            let quoted_col = quote_identifier_postgres(column_name);
             match udt_name.as_str() {
                 "geometry" | "geography" => {
                     // Export geometry as EWKT (includes SRID)
-                    format!("ST_AsEWKT(\"{}\") as \"{}\"", column_name, column_name)
+                    format!("ST_AsEWKT({}) as {}", quoted_col, quoted_col)
                 }
-                _ => format!("\"{}\"", column_name)
+                _ => quoted_col
             }
         })
         .collect();
 
-    let query = format!("SELECT {} FROM \"{}\"", select_parts.join(", "), table_name);
+    let query = format!("SELECT {} FROM {}", select_parts.join(", "), quote_identifier_postgres(table_name));
     let rows = sqlx::query(&query).fetch_all(&pool).await?;
 
     let csv_path = output_path.join(format!("{}.csv", table_name));
@@ -385,32 +398,32 @@ fn format_postgres_value(
         // UUID type
         "uuid" => {
             if let Ok(val) = row.try_get::<Option<uuid::Uuid>, _>(idx) {
-                return val.map(|v| v.to_string()).unwrap_or_default();
+                return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
         // Numeric/Decimal types (arbitrary precision)
         "numeric" => {
             if let Ok(val) = row.try_get::<Option<rust_decimal::Decimal>, _>(idx) {
-                return val.map(|v| v.to_string()).unwrap_or_default();
+                return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
         // JSON/JSONB types
         "json" | "jsonb" => {
             if let Ok(val) = row.try_get::<Option<serde_json::Value>, _>(idx) {
-                return val.map(|v| v.to_string()).unwrap_or_default();
+                return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
         // IP address types (inet, cidr)
         "inet" | "cidr" => {
             if let Ok(val) = row.try_get::<Option<ipnetwork::IpNetwork>, _>(idx) {
-                return val.map(|v| v.to_string()).unwrap_or_default();
+                return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
             // Fallback to IpAddr for simple inet
             if let Ok(val) = row.try_get::<Option<std::net::IpAddr>, _>(idx) {
-                return val.map(|v| v.to_string()).unwrap_or_default();
+                return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
@@ -420,7 +433,7 @@ fn format_postgres_value(
                 return val.map(|v| {
                     format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
                         v[0], v[1], v[2], v[3], v[4], v[5])
-                }).unwrap_or_default();
+                }).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
@@ -445,7 +458,7 @@ fn format_postgres_value(
                     } else {
                         parts.join(" ")
                     }
-                }).unwrap_or_default();
+                }).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
@@ -453,13 +466,13 @@ fn format_postgres_value(
         "_int4" | "_int8" | "_int2" => {
             // Integer arrays
             if let Ok(val) = row.try_get::<Option<Vec<i32>>, _>(idx) {
-                return val.map(|v| format!("{{{}}}", v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))).unwrap_or_default();
+                return val.map(|v| format!("{{{}}}", v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
             if let Ok(val) = row.try_get::<Option<Vec<i64>>, _>(idx) {
-                return val.map(|v| format!("{{{}}}", v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))).unwrap_or_default();
+                return val.map(|v| format!("{{{}}}", v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
             if let Ok(val) = row.try_get::<Option<Vec<i16>>, _>(idx) {
-                return val.map(|v| format!("{{{}}}", v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))).unwrap_or_default();
+                return val.map(|v| format!("{{{}}}", v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
@@ -476,28 +489,28 @@ fn format_postgres_value(
                         }
                     }).collect();
                     format!("{{{}}}", escaped.join(","))
-                }).unwrap_or_default();
+                }).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
         "_bool" => {
             // Boolean arrays
             if let Ok(val) = row.try_get::<Option<Vec<bool>>, _>(idx) {
-                return val.map(|v| format!("{{{}}}", v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))).unwrap_or_default();
+                return val.map(|v| format!("{{{}}}", v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
         // Geometry/Geography types (already converted to EWKT in SELECT)
         "geometry" | "geography" => {
             if let Ok(val) = row.try_get::<Option<String>, _>(idx) {
-                return val.unwrap_or_default();
+                return val.unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
         // Binary types
         "bytea" => {
             if let Ok(val) = row.try_get::<Option<Vec<u8>>, _>(idx) {
-                return val.map(|v| format!("\\x{}", hex::encode(v))).unwrap_or_default();
+                return val.map(|v| format!("\\x{}", hex::encode(v))).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
@@ -509,7 +522,7 @@ fn format_postgres_value(
         "ARRAY" => {
             // Generic array fallback - try as string array
             if let Ok(val) = row.try_get::<Option<Vec<String>>, _>(idx) {
-                return val.map(|v| format!("{{{}}}", v.join(","))).unwrap_or_default();
+                return val.map(|v| format!("{{{}}}", v.join(","))).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
         _ => {}
@@ -518,50 +531,50 @@ fn format_postgres_value(
     // Standard types - try in order of likelihood
     // String types (most common)
     if let Ok(val) = row.try_get::<Option<String>, _>(idx) {
-        return val.unwrap_or_default();
+        return val.unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // DateTime types
     if let Ok(val) = row.try_get::<Option<chrono::NaiveDateTime>, _>(idx) {
-        return val.map(|v| v.format("%Y-%m-%d %H:%M:%S").to_string()).unwrap_or_default();
+        return val.map(|v| v.format("%Y-%m-%d %H:%M:%S").to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(idx) {
-        return val.map(|v| v.format("%Y-%m-%d %H:%M:%S").to_string()).unwrap_or_default();
+        return val.map(|v| v.to_rfc3339()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<chrono::NaiveDate>, _>(idx) {
-        return val.map(|v| v.format("%Y-%m-%d").to_string()).unwrap_or_default();
+        return val.map(|v| v.format("%Y-%m-%d").to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<chrono::NaiveTime>, _>(idx) {
-        return val.map(|v| v.format("%H:%M:%S").to_string()).unwrap_or_default();
+        return val.map(|v| v.format("%H:%M:%S").to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // Integer types
     if let Ok(val) = row.try_get::<Option<i16>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<i32>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<i64>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // Float types
     if let Ok(val) = row.try_get::<Option<f32>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<f64>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // Boolean
     if let Ok(val) = row.try_get::<Option<bool>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // Binary data fallback
     if let Ok(val) = row.try_get::<Option<Vec<u8>>, _>(idx) {
-        return val.map(|v| format!("\\x{}", hex::encode(v))).unwrap_or_default();
+        return val.map(|v| format!("\\x{}", hex::encode(v))).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // Fallback for unknown types
@@ -576,25 +589,38 @@ async fn export_mysql_table(
 ) -> AppResult<()> {
     let pool = manager.get_pool_mysql(connection_id).await?;
 
-    // First, query column metadata to get types
-    let type_query = format!(
+    // First, query column metadata to get types (using parameterized query)
+    let column_metadata: Vec<(String, String, String)> = sqlx::query_as(
         "SELECT COLUMN_NAME, DATA_TYPE, COLUMN_TYPE
          FROM INFORMATION_SCHEMA.COLUMNS
-         WHERE TABLE_NAME = '{}' AND TABLE_SCHEMA = DATABASE()
-         ORDER BY ORDINAL_POSITION",
-        table_name
-    );
-
-    let column_metadata: Vec<(String, String, String)> = sqlx::query_as(&type_query)
-        .fetch_all(&pool)
-        .await?;
+         WHERE TABLE_NAME = ? AND TABLE_SCHEMA = DATABASE()
+         ORDER BY ORDINAL_POSITION"
+    )
+    .bind(table_name)
+    .fetch_all(&pool)
+    .await?;
 
     if column_metadata.is_empty() {
         return Err(AppError::DatabaseError(format!("Table '{}' not found or has no columns", table_name)));
     }
 
-    // Get all rows
-    let query = format!("SELECT * FROM `{}`", table_name);
+    // Build SELECT with ST_AsText() for geometry columns to export as WKT
+    let select_parts: Vec<String> = column_metadata
+        .iter()
+        .map(|(col_name, data_type, _)| {
+            let quoted_col = quote_identifier_mysql(col_name);
+            match data_type.to_lowercase().as_str() {
+                "geometry" | "point" | "linestring" | "polygon" |
+                "multipoint" | "multilinestring" | "multipolygon" | "geometrycollection" => {
+                    // Export geometry as WKT text instead of binary
+                    format!("ST_AsText({}) as {}", quoted_col, quoted_col)
+                }
+                _ => quoted_col
+            }
+        })
+        .collect();
+
+    let query = format!("SELECT {} FROM {}", select_parts.join(", "), quote_identifier_mysql(table_name));
     let rows = sqlx::query(&query).fetch_all(&pool).await?;
 
     let csv_path = output_path.join(format!("{}.csv", table_name));
@@ -662,14 +688,14 @@ fn format_mysql_value(
         // JSON type
         "json" => {
             if let Ok(val) = row.try_get::<Option<serde_json::Value>, _>(idx) {
-                return val.map(|v| v.to_string()).unwrap_or_default();
+                return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
         // Decimal/Numeric types (arbitrary precision)
         "decimal" | "numeric" => {
             if let Ok(val) = row.try_get::<Option<rust_decimal::Decimal>, _>(idx) {
-                return val.map(|v| v.to_string()).unwrap_or_default();
+                return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
@@ -678,14 +704,14 @@ fn format_mysql_value(
         "multipoint" | "multilinestring" | "multipolygon" | "geometrycollection" => {
             // MySQL returns geometry as binary, convert to WKT for portability
             if let Ok(val) = row.try_get::<Option<Vec<u8>>, _>(idx) {
-                return val.map(|v| format!("0x{}", hex::encode(v))).unwrap_or_default();
+                return val.map(|v| format!("0x{}", hex::encode(v))).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
         // Binary types
         "binary" | "varbinary" | "blob" | "tinyblob" | "mediumblob" | "longblob" => {
             if let Ok(val) = row.try_get::<Option<Vec<u8>>, _>(idx) {
-                return val.map(|v| format!("0x{}", hex::encode(v))).unwrap_or_default();
+                return val.map(|v| format!("0x{}", hex::encode(v))).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
@@ -693,14 +719,14 @@ fn format_mysql_value(
         "bit" => {
             // Try as u64 first for BIT columns
             if let Ok(val) = row.try_get::<Option<u64>, _>(idx) {
-                return val.map(|v| v.to_string()).unwrap_or_default();
+                return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
         // Set and Enum types are returned as strings by MySQL
         "set" | "enum" => {
             if let Ok(val) = row.try_get::<Option<String>, _>(idx) {
-                return val.unwrap_or_default();
+                return val.unwrap_or_else(|| CSV_NULL_MARKER.to_string());
             }
         }
 
@@ -710,67 +736,67 @@ fn format_mysql_value(
     // Standard types - try in order of likelihood
     // String types (most common)
     if let Ok(val) = row.try_get::<Option<String>, _>(idx) {
-        return val.unwrap_or_default();
+        return val.unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // DateTime types
     if let Ok(val) = row.try_get::<Option<chrono::NaiveDateTime>, _>(idx) {
-        return val.map(|v| v.format("%Y-%m-%d %H:%M:%S").to_string()).unwrap_or_default();
+        return val.map(|v| v.format("%Y-%m-%d %H:%M:%S").to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(idx) {
-        return val.map(|v| v.format("%Y-%m-%d %H:%M:%S").to_string()).unwrap_or_default();
+        return val.map(|v| v.to_rfc3339()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<chrono::NaiveDate>, _>(idx) {
-        return val.map(|v| v.format("%Y-%m-%d").to_string()).unwrap_or_default();
+        return val.map(|v| v.format("%Y-%m-%d").to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<chrono::NaiveTime>, _>(idx) {
-        return val.map(|v| v.format("%H:%M:%S").to_string()).unwrap_or_default();
+        return val.map(|v| v.format("%H:%M:%S").to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // Signed integer types
     if let Ok(val) = row.try_get::<Option<i8>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<i16>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<i32>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<i64>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // Unsigned integer types
     if let Ok(val) = row.try_get::<Option<u8>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<u16>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<u32>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<u64>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // Float types
     if let Ok(val) = row.try_get::<Option<f32>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
     if let Ok(val) = row.try_get::<Option<f64>, _>(idx) {
-        return val.map(|v| v.to_string()).unwrap_or_default();
+        return val.map(|v| v.to_string()).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // Boolean (TINYINT(1) in MySQL)
     if let Ok(val) = row.try_get::<Option<bool>, _>(idx) {
-        return val.map(|v| if v { "1".to_string() } else { "0".to_string() }).unwrap_or_default();
+        return val.map(|v| if v { "1".to_string() } else { "0".to_string() }).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // Binary data fallback
     if let Ok(val) = row.try_get::<Option<Vec<u8>>, _>(idx) {
-        return val.map(|v| format!("0x{}", hex::encode(v))).unwrap_or_default();
+        return val.map(|v| format!("0x{}", hex::encode(v))).unwrap_or_else(|| CSV_NULL_MARKER.to_string());
     }
 
     // Fallback for unknown types
@@ -1097,10 +1123,11 @@ async fn export_mysql_schema(
         .map(|(table_name,)| {
             let pool = pool.clone();
             async move {
-                let create_result: (String, String) =
-                    sqlx::query_as(&format!("SHOW CREATE TABLE `{}`", table_name))
-                        .fetch_one(&pool)
-                        .await?;
+                // Use properly quoted table name to prevent SQL injection
+                let query = format!("SHOW CREATE TABLE {}", quote_identifier_mysql(&table_name));
+                let create_result: (String, String) = sqlx::query_as(&query)
+                    .fetch_one(&pool)
+                    .await?;
                 Ok((table_name, create_result.1))
             }
         })
@@ -1140,8 +1167,8 @@ async fn export_mysql_schema(
 
     // Write DROP TABLE IF EXISTS and CREATE TABLE statements in order
     for (table_name, create_stmt) in schemas {
-        // Write DROP TABLE IF EXISTS first for idempotent imports
-        writeln!(file, "DROP TABLE IF EXISTS `{}`;\n", table_name).map_err(|e| {
+        // Write DROP TABLE IF EXISTS first for idempotent imports (properly quoted)
+        writeln!(file, "DROP TABLE IF EXISTS {};\n", quote_identifier_mysql(&table_name)).map_err(|e| {
             AppError::IoError(format!("Failed to write to schema file: {}", e))
         })?;
 
